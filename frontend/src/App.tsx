@@ -92,6 +92,8 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [showCreateInput, setShowCreateInput] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
+  const [isVisualsOpen, setIsVisualsOpen] = useState(false);
+  const [prevChartCount, setPrevChartCount] = useState(0);
   
   const [isEditingWorkspaceTitle, setIsEditingWorkspaceTitle] = useState(false);
   const [tempWorkspaceTitle, setTempWorkspaceTitle] = useState("");
@@ -226,6 +228,17 @@ export default function App() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isQuerying]);
+
+  // Auto-toggle visuals pane on getting first visualization or when count increases
+  useEffect(() => {
+    const chartCount = messages.filter(m => !!m.chart_url).length;
+    if (chartCount > prevChartCount) {
+      setIsVisualsOpen(true);
+    } else if (chartCount === 0) {
+      setIsVisualsOpen(false);
+    }
+    setPrevChartCount(chartCount);
+  }, [messages]);
 
   const fetchSessionData = async (sessionId: string) => {
     try {
@@ -486,6 +499,26 @@ export default function App() {
     } finally {
       abortControllerRef.current = null;
       setIsQuerying(false);
+    }
+  };
+
+  const handleDeleteDatasetSource = async () => {
+    if (!selectedSessionId) return;
+    if (!confirm("Are you sure you want to delete this dataset source? This will permanently clear all workspace messages and visualizations.")) return;
+    try {
+      const res = await fetch(`${API_BASE}/sessions/${selectedSessionId}/dataset`, {
+        method: "DELETE"
+      });
+      if (res.ok) {
+        setDataset(null);
+        setMessages([]);
+        setSelectedDiagram(null);
+        setShowCodeMap({});
+        setShowChartCodeMap({});
+        setIsVisualsOpen(false);
+      }
+    } catch (err) {
+      console.error("Error deleting source:", err);
     }
   };
 
@@ -930,10 +963,10 @@ export default function App() {
                 </div>
                 {dataset && (
                   <button
-                    onClick={() => setDataset(null)}
-                    className="text-[10px] font-bold uppercase tracking-wider text-zinc-200 hover:text-white px-2.5 py-1 bg-[#1c1c1f] border border-[#27272a] rounded-md transition shrink-0"
+                    onClick={handleDeleteDatasetSource}
+                    className="text-[10px] font-bold uppercase tracking-wider text-red-400 hover:text-red-350 hover:bg-red-950/20 px-2.5 py-1 bg-[#1c1c1f] border border-[#27272a] hover:border-red-900 rounded-md transition shrink-0"
                   >
-                    Change Source
+                    Delete Source
                   </button>
                 )}
               </div>
@@ -1080,8 +1113,8 @@ export default function App() {
               </div>
             </div>
 
-            {/* PANE 2: MIDDLE CONVERSATIONAL CHAT (40%) */}
-            <div className="w-[40%] border-r border-[#27272a] bg-[#09090b] flex flex-col overflow-hidden">
+            {/* PANE 2: MIDDLE CONVERSATIONAL CHAT (Resizes dynamically) */}
+            <div className="flex-1 min-w-[30%] border-r border-[#27272a] bg-[#09090b] flex flex-col overflow-hidden">
               <div className="p-4 border-b border-[#27272a] bg-[#121214] flex items-center justify-between">
                 <h2 className="font-semibold text-white">Analysis Room</h2>
               </div>
@@ -1092,13 +1125,13 @@ export default function App() {
                   <div className="space-y-4">
                     <div className="bg-[#1c1c1f] border border-[#27272a] rounded-2xl p-4 text-sm text-zinc-300 space-y-2">
                       <h3 className="font-bold text-white text-base">Welcome to the Autonomous Data Agent</h3>
-                      <p className="text-xs text-zinc-450 leading-relaxed">
+                      <p className="text-xs text-zinc-400 leading-relaxed">
                         This is an interactive analytics environment. Once you launch a workspace, you can ingest files, query stats, and automatically visualize datasets.
                       </p>
                     </div>
                     <div className="bg-[#1c1c1f] border border-[#27272a] rounded-2xl p-4 text-sm text-zinc-300 space-y-2">
                       <h4 className="font-bold text-white text-xs uppercase tracking-wider text-zinc-400">Quick Guide:</h4>
-                      <ol className="list-decimal pl-4 space-y-1.5 text-xs text-zinc-455">
+                      <ol className="list-decimal pl-4 space-y-1.5 text-xs text-zinc-400">
                         <li>Import your dataset (CSV, JSON, or Excel) or connect to your database.</li>
                         <li>Ask query calculations directly in natural language (e.g., "Find the average salary by department").</li>
                         <li>Visualize graphs dynamically in the Visual Analytics viewport.</li>
@@ -1211,134 +1244,186 @@ export default function App() {
               </form>
             </div>
 
-            {/* PANE 3: RIGHT VISUALS PERSISTENT VIEWPORT (30%) */}
-            <div className="w-[30%] bg-[#09090b] flex flex-col overflow-hidden">
-              <div className="p-4 border-b border-[#27272a] bg-[#121214] flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-2">
-                  <TrendingUp className="w-5 h-5 text-white" />
-                  <h2 className="font-semibold text-white">Visual Analytics</h2>
-                </div>
-                {messages.filter(m => m.chart_url).length > 0 && (
-                  <span className="text-[10px] font-mono bg-zinc-900 border border-zinc-800 text-zinc-400 px-2 py-0.5 rounded-full">
-                    {messages.filter(m => m.chart_url).length} plots
-                  </span>
-                )}
-              </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {messages.filter(m => m.chart_url).length > 0 ? (
-                  messages.filter(m => m.chart_url).map((m, cidx) => {
-                    const chartUrl = m.chart_url || "";
-                    const fullUrl = chartUrl.startsWith("http") ? chartUrl : `http://localhost:8000${chartUrl}`;
-                    const msgIdx = messages.findIndex(msg => msg.id === m.id);
-                    const associatedQuestion = msgIdx > 0 ? messages[msgIdx - 1].content : "Data query visualization";
-                    
-                    const plotTitle = m.chart_summary ? m.chart_summary.split('.')[0] : associatedQuestion;
-                    const plotTime = new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                    const isCodeOpen = !!showChartCodeMap[m.id];
-
-                    return (
-                      <div 
-                        key={m.id || `chart-${cidx}`}
-                        className="group relative bg-[#1c1c1f] border border-[#27272a] hover:border-zinc-500 rounded-xl overflow-hidden transition-all duration-300 flex flex-col"
-                      >
-                        {/* Header: Title of the plot and a timestamp */}
-                        <div className="px-3.5 py-2.5 border-b border-[#27272a]/60 bg-black/40 flex items-start justify-between gap-2 shrink-0">
-                          <div className="flex flex-col min-w-0 flex-1">
-                            <span className="text-xs font-bold text-white truncate" title={plotTitle}>
-                              {plotTitle}
-                            </span>
-                            <span className="text-[10px] text-zinc-400 mt-0.5 font-mono">Plot #{cidx + 1}</span>
-                          </div>
-                          <span className="text-[10px] text-zinc-550 font-mono shrink-0 mt-0.5">
-                            {plotTime}
-                          </span>
-                        </div>
-
-                        {/* Image body */}
-                        <div 
-                          onClick={() => setZoomedChartUrl(fullUrl)}
-                          className="flex-1 min-h-[160px] p-3 flex items-center justify-center bg-[#09090b]/45 cursor-zoom-in group-hover:opacity-90 transition-opacity relative border-b border-[#27272a]/40"
-                        >
-                          <img 
-                            src={fullUrl} 
-                            alt={plotTitle} 
-                            className="max-h-[180px] object-contain rounded border border-transparent shadow-md"
-                          />
-                        </div>
-
-                        {/* Collapsible Inline Code viewer */}
-                        {isCodeOpen && m.generated_code && (
-                          <div className="bg-black/90 p-3 font-mono text-[10px] text-emerald-400 border-b border-[#27272a] max-h-[150px] overflow-y-auto select-text">
-                            <span className="text-[9px] uppercase tracking-wider text-zinc-500 font-mono block mb-1">Generated Python Code</span>
-                            <pre className="whitespace-pre overflow-x-auto">
-                              <code>{m.generated_code}</code>
-                            </pre>
-                          </div>
-                        )}
-
-                        {/* Footer (The Action Strip) */}
-                        <div className="px-2.5 py-2 bg-[#121214] flex items-center justify-between gap-2 shrink-0">
-                          <button
-                            onClick={() => setShowChartCodeMap(prev => ({ ...prev, [m.id]: !prev[m.id] }))}
-                            className={`flex-1 py-1.5 rounded-lg border text-[11px] font-semibold flex items-center justify-center gap-1 transition ${
-                              isCodeOpen 
-                                ? "bg-white text-black border-white" 
-                                : "bg-[#1c1c1f] text-zinc-300 border-[#27272a] hover:bg-[#27272a] hover:text-white"
-                            }`}
-                          >
-                            <Code className="w-3.5 h-3.5" />
-                            <span>Code</span>
-                          </button>
-                          
-                          <button
-                            onClick={() => {
-                              setSelectedDiagram({
-                                id: m.id,
-                                chartUrl: fullUrl,
-                                code: m.generated_code || "",
-                                summary: m.chart_summary || "Visual chart",
-                                question: associatedQuestion
-                              });
-                              setQuestion("");
-                              setTimeout(() => {
-                                chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-                                questionInputRef.current?.focus();
-                              }, 100);
-                            }}
-                            className="flex-1 py-1.5 rounded-lg bg-[#1c1c1f] text-zinc-300 border border-[#27272a] hover:bg-[#27272a] hover:text-white text-[11px] font-semibold flex items-center justify-center gap-1 transition"
-                          >
-                            <MessageSquare className="w-3.5 h-3.5" />
-                            <span>Discuss</span>
-                          </button>
-                          
-                          <button
-                            onClick={() => {
-                              const link = document.createElement("a");
-                              link.href = fullUrl;
-                              link.download = `plot_${cidx + 1}.png`;
-                              document.body.appendChild(link);
-                              link.click();
-                              document.body.removeChild(link);
-                            }}
-                            className="flex-1 py-1.5 rounded-lg bg-[#1c1c1f] text-zinc-300 border border-[#27272a] hover:bg-[#27272a] hover:text-white text-[11px] font-semibold flex items-center justify-center gap-1 transition"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                            <span>Save</span>
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="h-64 flex flex-col items-center justify-center text-center">
-                    <div className="w-12 h-12 rounded-full bg-[#1c1c1f] border border-[#27272a] flex items-center justify-center text-zinc-500 mb-3">
-                      <ImageIcon className="w-6 h-6" />
-                    </div>
-                    <h3 className="text-white font-medium mb-1">No Visualizations</h3>
-                    <p className="text-[10px] text-zinc-500 max-w-[180px]">Plot generation requires numerical values queries.</p>
+            {/* PANE 3: RIGHT VISUALS PERSISTENT VIEWPORT */}
+            <div 
+              className={`transition-all duration-300 ease-in-out flex flex-col overflow-hidden shrink-0 border-l border-[#27272a] ${
+                isVisualsOpen ? "w-[30%] min-w-[280px] bg-[#09090b]" : "w-12 bg-[#121214] hover:bg-[#1c1c1f] cursor-pointer"
+              }`}
+              onClick={() => {
+                if (!isVisualsOpen) {
+                  setIsVisualsOpen(true);
+                }
+              }}
+            >
+              {!isVisualsOpen ? (
+                <div className="flex-1 flex flex-col items-center justify-between py-6 h-full select-none">
+                  {/* Chevron pointing left to expand */}
+                  <ChevronRight className="w-5 h-5 text-zinc-455 rotate-180" />
+                  
+                  {/* Vertical title written vertically */}
+                  <div className="flex-1 flex items-center justify-center">
+                    <span 
+                      style={{ writingMode: "vertical-rl" }} 
+                      className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-[#a1a1aa] select-none transform rotate-180 flex items-center gap-2"
+                    >
+                      <TrendingUp className="w-3.5 h-3.5 inline-block transform -rotate-90 text-zinc-400" />
+                      Visual Analytics
+                    </span>
                   </div>
-                )}
-              </div>
+
+                  {/* Badging showing plot count */}
+                  {messages.filter(m => m.chart_url).length > 0 ? (
+                    <span className="text-[9px] font-bold font-mono bg-zinc-800 border border-zinc-700 text-zinc-350 px-2 py-0.5 rounded-full">
+                      {messages.filter(m => m.chart_url).length}
+                    </span>
+                  ) : (
+                    <div className="h-4 w-4 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#3f3f46]" />
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div className="p-4 border-b border-[#27272a] bg-[#121214] flex items-center justify-between shrink-0">
+                    <div className="flex items-center gap-2">
+                      <TrendingUp className="w-5 h-5 text-white" />
+                      <h2 className="font-semibold text-white">Visual Analytics</h2>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {messages.filter(m => m.chart_url).length > 0 && (
+                        <span className="text-[10px] font-mono bg-zinc-900 border border-zinc-800 text-zinc-400 px-2 py-0.5 rounded-full">
+                          {messages.filter(m => m.chart_url).length} plots
+                        </span>
+                      )}
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsVisualsOpen(false);
+                        }}
+                        className="p-1 hover:bg-[#27272a] rounded text-zinc-400 hover:text-white transition"
+                        title="Collapse Panel"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                    {messages.filter(m => m.chart_url).length > 0 ? (
+                      messages.filter(m => m.chart_url).map((m, cidx) => {
+                        const chartUrl = m.chart_url || "";
+                        const fullUrl = chartUrl.startsWith("http") ? chartUrl : `http://localhost:8000${chartUrl}`;
+                        const msgIdx = messages.findIndex(msg => msg.id === m.id);
+                        const associatedQuestion = msgIdx > 0 ? messages[msgIdx - 1].content : "Data query visualization";
+                        
+                        const plotTitle = m.chart_summary ? m.chart_summary.split('.')[0] : associatedQuestion;
+                        const plotTime = new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        const isCodeOpen = !!showChartCodeMap[m.id];
+
+                        return (
+                          <div 
+                            key={m.id || `chart-${cidx}`}
+                            className="group relative bg-[#1c1c1f] border border-[#27272a] hover:border-zinc-500 rounded-xl overflow-hidden transition-all duration-300 flex flex-col"
+                          >
+                            {/* Header: Title of the plot and a timestamp */}
+                            <div className="px-3.5 py-2.5 border-b border-[#27272a]/60 bg-black/40 flex items-start justify-between gap-2 shrink-0">
+                              <div className="flex flex-col min-w-0 flex-1">
+                                <span className="text-xs font-bold text-white truncate" title={plotTitle}>
+                                  {plotTitle}
+                                </span>
+                                <span className="text-[10px] text-zinc-400 mt-0.5 font-mono">Plot #{cidx + 1}</span>
+                              </div>
+                              <span className="text-[10px] text-zinc-550 font-mono shrink-0 mt-0.5">
+                                {plotTime}
+                              </span>
+                            </div>
+
+                            {/* Image body */}
+                            <div 
+                              onClick={() => setZoomedChartUrl(fullUrl)}
+                              className="flex-1 min-h-[160px] p-3 flex items-center justify-center bg-[#09090b]/45 cursor-zoom-in group-hover:opacity-90 transition-opacity relative border-b border-[#27272a]/40"
+                            >
+                              <img 
+                                src={fullUrl} 
+                                alt={plotTitle} 
+                                className="max-h-[180px] object-contain rounded border border-transparent shadow-md"
+                              />
+                            </div>
+
+                            {/* Collapsible Inline Code viewer */}
+                            {isCodeOpen && m.generated_code && (
+                              <div className="bg-black/90 p-3 font-mono text-[10px] text-emerald-400 border-b border-[#27272a] max-h-[150px] overflow-y-auto select-text">
+                                <span className="text-[9px] uppercase tracking-wider text-zinc-500 font-mono block mb-1">Generated Python Code</span>
+                                <pre className="whitespace-pre overflow-x-auto">
+                                  <code>{m.generated_code}</code>
+                                </pre>
+                              </div>
+                            )}
+
+                            {/* Footer (The Action Strip) */}
+                            <div className="px-2.5 py-2 bg-[#121214] flex items-center justify-between gap-2 shrink-0">
+                              <button
+                                onClick={() => setShowChartCodeMap(prev => ({ ...prev, [m.id]: !prev[m.id] }))}
+                                className={`flex-1 py-1.5 rounded-lg border text-[11px] font-semibold flex items-center justify-center gap-1 transition ${
+                                  isCodeOpen 
+                                    ? "bg-white text-black border-white" 
+                                    : "bg-[#1c1c1f] text-zinc-300 border-[#27272a] hover:bg-[#27272a] hover:text-white"
+                                }`}
+                              >
+                                <Code className="w-3.5 h-3.5" />
+                                <span>Code</span>
+                              </button>
+                              
+                              <button
+                                onClick={() => {
+                                  setSelectedDiagram({
+                                    id: m.id,
+                                    chartUrl: fullUrl,
+                                    code: m.generated_code || "",
+                                    summary: m.chart_summary || "Visual chart",
+                                    question: associatedQuestion
+                                  });
+                                  setQuestion("");
+                                  setTimeout(() => {
+                                    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+                                    questionInputRef.current?.focus();
+                                  }, 100);
+                                }}
+                                className="flex-1 py-1.5 rounded-lg bg-[#1c1c1f] text-zinc-300 border border-[#27272a] hover:bg-[#27272a] hover:text-white text-[11px] font-semibold flex items-center justify-center gap-1 transition"
+                              >
+                                <MessageSquare className="w-3.5 h-3.5" />
+                                <span>Discuss</span>
+                              </button>
+                              
+                              <button
+                                onClick={() => {
+                                  const link = document.createElement("a");
+                                  link.href = fullUrl;
+                                  link.download = `plot_${cidx + 1}.png`;
+                                  document.body.appendChild(link);
+                                  link.click();
+                                  document.body.removeChild(link);
+                                }}
+                                className="flex-1 py-1.5 rounded-lg bg-[#1c1c1f] text-zinc-300 border border-[#27272a] hover:bg-[#27272a] hover:text-white text-[11px] font-semibold flex items-center justify-center gap-1 transition"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                                <span>Save</span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="h-64 flex flex-col items-center justify-center text-center">
+                        <div className="w-12 h-12 rounded-full bg-[#1c1c1f] border border-[#27272a] flex items-center justify-center text-zinc-500 mb-3">
+                          <ImageIcon className="w-6 h-6" />
+                        </div>
+                        <h3 className="text-white font-medium mb-1">No Visualizations</h3>
+                        <p className="text-[10px] text-zinc-550 max-w-[180px]">Plot generation requires numerical values queries.</p>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
 
           </div>
