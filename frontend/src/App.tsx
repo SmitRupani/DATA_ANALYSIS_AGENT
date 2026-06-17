@@ -370,8 +370,7 @@ export default function App() {
     }
   }, [selectedSessionId, activeThreadId]);
 
-  // Load preview data when dataset changes
-// Scroll to bottom of chat
+  // Scroll to bottom of chat
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isQuerying]);
@@ -1752,7 +1751,8 @@ export default function App() {
                     onChange={(e) => setQuestion(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && question.trim() && !isQuerying && !streamingMsgId) {
-                        handleSend();
+                        executeAnalysisQuestion(question);
+                        setQuestion("");
                       }
                     }}
                     disabled={!selectedSessionId || isQuerying}
