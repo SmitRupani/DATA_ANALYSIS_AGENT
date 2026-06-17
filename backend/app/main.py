@@ -2,6 +2,7 @@ import os
 import shutil
 import httpx
 import pandas as pd
+from typing import Optional
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -30,6 +31,7 @@ class SessionCreate(BaseModel):
 
 class QueryRequest(BaseModel):
     question: str
+    chart_url: Optional[str] = None
 
 class DBConnectRequest(BaseModel):
     connection_string: str
@@ -37,8 +39,9 @@ class DBConnectRequest(BaseModel):
 
 def get_local_dataset_path(session_id: str, file_name: str) -> str:
     """Helper to determine the local cached path for a session's dataset."""
+    base_id = session_id.split(":")[0]
     ext = os.path.splitext(file_name)[-1]
-    return os.path.join(TEMP_DATA_DIR, f"{session_id}_dataset{ext}")
+    return os.path.join(TEMP_DATA_DIR, f"{base_id}_dataset{ext}")
 
 def download_dataset_if_missing(s3_path: str, local_path: str):
     """Downloads dataset from Supabase Storage if local cache is missing."""
@@ -108,27 +111,25 @@ async def delete_session(session_id: str):
 @app.delete("/api/sessions/{session_id}/messages")
 async def clear_session_messages(session_id: str):
     try:
-        if not db_service.client:
-            db_service.mock_messages[session_id] = []
-        else:
-            db_service.client.table("messages").delete().eq("session_id", session_id).execute()
+        db_service.clear_messages(session_id)
         return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/sessions/{session_id}/dataset")
 async def delete_session_dataset(session_id: str):
+    base_id = session_id.split(":")[0]
     try:
         if not db_service.client:
-            db_service.mock_datasets.pop(session_id, None)
-            db_service.mock_messages[session_id] = []
+            db_service.mock_datasets.pop(base_id, None)
+            db_service.mock_messages[base_id] = []
         else:
-            db_service.client.table("datasets").delete().eq("session_id", session_id).execute()
-            db_service.client.table("messages").delete().eq("session_id", session_id).execute()
+            db_service.client.table("datasets").delete().eq("session_id", base_id).execute()
+            db_service.client.table("messages").delete().eq("session_id", base_id).execute()
         
         # Also delete local cached files
         for f in os.listdir(TEMP_DATA_DIR):
-            if f.startswith(session_id):
+            if f.startswith(base_id):
                 try:
                     os.remove(os.path.join(TEMP_DATA_DIR, f))
                 except Exception:
@@ -162,10 +163,11 @@ async def upload_dataset(session_id: str, file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=f"Failed to profile dataset: {e}")
 
     # 4. Upload raw file to Supabase Storage
+    base_id = session_id.split(":")[0]
     try:
         with open(local_path, "rb") as f:
             file_bytes = f.read()
-        storage_path = f"{session_id}/dataset{ext}"
+        storage_path = f"{base_id}/dataset{ext}"
         db_service.upload_file("datasets", storage_path, file_bytes, file.content_type or "application/octet-stream")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to store file: {e}")
@@ -340,6 +342,27 @@ async def get_dataset_view(session_id: str):
     except Exception as e:
         return HTMLResponse(f"<h3>Error rendering preview: {str(e)}</h3>", status_code=500)
 
+@app.delete("/api/messages/{message_id}/chart")
+async def delete_message_chart(message_id: str):
+    try:
+        if not db_service.client:
+            # Local mock mode
+            for session_id, msgs in db_service.mock_messages.items():
+                for m in msgs:
+                    if m.get("id") == message_id:
+                        m["chart_url"] = None
+                        m["chart_summary"] = None
+                        return {"success": True}
+            raise HTTPException(status_code=404, detail="Message not found.")
+        else:
+            db_service.client.table("messages").update({
+                "chart_url": None,
+                "chart_summary": None
+            }).eq("id", message_id).execute()
+            return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/sessions/{session_id}/messages")
 async def get_session_messages(session_id: str):
     try:
@@ -367,7 +390,7 @@ async def query_session(session_id: str, request: QueryRequest):
 
     # 3. Process query through pipeline and Sisyphus execution sandbox
     try:
-        response = process_query(session_id, request.question, schema, local_path)
+        response = process_query(session_id, request.question, schema, local_path, request.chart_url)
         return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Pipeline Orchestration Error: {e}")
@@ -415,7 +438,8 @@ async def connect_sql_db(session_id: str, request: DBConnectRequest):
         raise HTTPException(status_code=400, detail=f"Failed to profile SQL table: {e}")
 
     # 4. Upload raw file to Storage
-    storage_path = f"{session_id}/dataset.csv"
+    base_id = session_id.split(":")[0]
+    storage_path = f"{base_id}/dataset.csv"
     try:
         with open(local_path, "rb") as f:
             file_bytes = f.read()

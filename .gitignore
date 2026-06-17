@@ -7,3 +7,5 @@ __pycache__/
 *.xlsx
 *.json
 .env
+temp_datasets/
+local_storage/

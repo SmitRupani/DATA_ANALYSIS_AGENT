@@ -1,4 +1,5 @@
 import os
+# pyrefly: ignore [missing-import]
 import duckdb
 import pandas as pd
 
@@ -19,8 +20,11 @@ def load_file_into_duckdb(con: duckdb.DuckDBPyConnection, filepath: str) -> str:
         con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT * FROM read_json_auto('{filepath}')")
     elif ext in [".xls", ".xlsx"]:
         # Fallback to pandas for Excel, then register the dataframe in DuckDB
-        df = pd.read_excel(filepath)
-        con.register(view_name, df)
+        try:
+            df = pd.read_excel(filepath)
+            con.register(view_name, df)
+        except ImportError:
+            raise ValueError("Excel parsing is not configured on this server. Please convert your file to CSV and upload again.")
     else:
         raise ValueError(f"Unsupported format: {ext}. Only CSV, Excel, and JSON are supported.")
         

@@ -75,6 +75,31 @@ export default function App() {
   const [isUploading, setIsUploading] = useState(false);
   const [isQuerying, setIsQuerying] = useState(false);
   const [showCodeMap, setShowCodeMap] = useState<Record<string, boolean>>({});
+  const [activeThreadId, setActiveThreadId] = useState<string>("default");
+  const [threads, setThreads] = useState<Record<string, { id: string; title: string }[]>>(() => {
+    try {
+      const saved = localStorage.getItem("data_agent_threads");
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem("data_agent_threads", JSON.stringify(threads));
+  }, [threads]);
+
+  useEffect(() => {
+    setActiveThreadId("default");
+  }, [selectedSessionId]);
+  
+  const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
+  const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
+  const [editingThreadTitle, setEditingThreadTitle] = useState("");
+  const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null);
+  const [showNewThreadInput, setShowNewThreadInput] = useState(false);
+  const [newThreadName, setNewThreadName] = useState("");
+  const [activeQuestion, setActiveQuestion] = useState("");
   
   const [showSqlModal, setShowSqlModal] = useState(false);
   const [dbType, setDbType] = useState("postgresql");
@@ -92,9 +117,10 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [showCreateInput, setShowCreateInput] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
-  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
   const [isVisualsOpen, setIsVisualsOpen] = useState(false);
   const [prevChartCount, setPrevChartCount] = useState(0);
+  const [activeMobileTab, setActiveMobileTab] = useState<"workspaces" | "schema" | "chat" | "visuals">("workspaces");
+  const [showInlineDeleteConfirm, setShowInlineDeleteConfirm] = useState(false);
   
   const [isEditingWorkspaceTitle, setIsEditingWorkspaceTitle] = useState(false);
   const [tempWorkspaceTitle, setTempWorkspaceTitle] = useState("");
@@ -105,6 +131,48 @@ export default function App() {
   const [activeNavMenu, setActiveNavMenu] = useState<"file" | "database" | "help" | null>(null);
   const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
   
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: "",
+    description: "",
+    onConfirm: () => {}
+  });
+
+  const [notification, setNotification] = useState<{
+    isOpen: boolean;
+    type: "success" | "error" | "info";
+    title: string;
+    message: string;
+  }>({
+    isOpen: false,
+    type: "info",
+    title: "",
+    message: ""
+  });
+
+  const showNotification = (type: "success" | "error" | "info", title: string, message: string) => {
+    setNotification({
+      isOpen: true,
+      type,
+      title,
+      message
+    });
+    setTimeout(() => {
+      setNotification(prev => {
+        // Only close if it matches the current notification message to prevent overlapping timers closing newer notifications
+        if (prev.message === message) {
+          return { ...prev, isOpen: false };
+        }
+        return prev;
+      });
+    }, 5000);
+  };
+
   const [hoveredColumnAnomaly, setHoveredColumnAnomaly] = useState<string | null>(null);
   const [selectedDiagram, setSelectedDiagram] = useState<{
     id: string;
@@ -117,6 +185,66 @@ export default function App() {
   
   const [showChartCodeMap, setShowChartCodeMap] = useState<Record<string, boolean>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const isVisualQuery = (q: string) => {
+    const keywords = ["plot", "chart", "visualize", "graph", "histogram", "bar", "pie", "scatter", "trend", "draw", "curve", "diagram"];
+    return keywords.some(k => q.toLowerCase().includes(k));
+  };
+
+  const formatSafeDate = (dateStr: string) => {
+    if (!dateStr) return "Just now";
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return "Just now";
+    return d.toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  };
+
+  const formatSafeTime = (dateStr: string) => {
+    if (!dateStr) return "Just now";
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return "Just now";
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const findRepliedChartUrl = (userMsgContent: string) => {
+    const match = userMsgContent.match(/Regarding the chart described as "([^"]+)"/);
+    if (!match) return null;
+    const desc = match[1];
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.chart_url && m.chart_summary && m.chart_summary.includes(desc)) {
+        const url = m.chart_url;
+        return url.startsWith("http") ? url : `${API_BASE.replace('/api', '')}${url}`;
+      }
+    }
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.chart_url) {
+        const url = m.chart_url;
+        return url.startsWith("http") ? url : `${API_BASE.replace('/api', '')}${url}`;
+      }
+    }
+    return null;
+  };
+
+  const uniqueCharts = React.useMemo(() => {
+    const charts: Message[] = [];
+    const seen = new Set<string>();
+    messages.forEach(m => {
+      if (m.chart_url) {
+        const key = m.chart_url.trim();
+        if (!seen.has(key)) {
+          seen.add(key);
+          charts.push(m);
+        }
+      }
+    });
+    return charts;
+  }, [messages]);
+
   const chatEndRef = useRef<HTMLDivElement>(null);
   const questionInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -164,6 +292,15 @@ export default function App() {
     }
   }, [selectedSessionId]);
 
+  // Set active mobile tab based on workspace selection
+  useEffect(() => {
+    if (!selectedSessionId) {
+      setActiveMobileTab("workspaces");
+    } else {
+      setActiveMobileTab("chat");
+    }
+  }, [selectedSessionId]);
+
   // Load Sessions
   useEffect(() => {
     fetchSessions();
@@ -199,6 +336,7 @@ export default function App() {
 
   const handleCreateSessionDirect = async () => {
     if (!newSessionTitle.trim()) return;
+    setIsCreatingWorkspace(true);
     try {
       const res = await fetch(`${API_BASE}/sessions`, {
         method: "POST",
@@ -208,23 +346,29 @@ export default function App() {
       if (res.ok) {
         const newSession = await res.json();
         setSessions(prev => [newSession, ...prev]);
-        setSelectedSessionId(newSession.id);
-        setNewSessionTitle("");
+        setTimeout(() => {
+          setSelectedSessionId(newSession.id);
+          setNewSessionTitle("");
+          setIsCreatingWorkspace(false);
+        }, 2000);
+      } else {
+        setIsCreatingWorkspace(false);
       }
     } catch (err) {
       console.error("Error creating session:", err);
+      setIsCreatingWorkspace(false);
     }
   };
 
   // Load session specific dataset and messages
   useEffect(() => {
     if (selectedSessionId) {
-      fetchSessionData(selectedSessionId);
+      fetchSessionData(selectedSessionId, activeThreadId);
     } else {
       setMessages([]);
       setDataset(null);
     }
-  }, [selectedSessionId]);
+  }, [selectedSessionId, activeThreadId]);
 
   // Load preview data when dataset changes
 // Scroll to bottom of chat
@@ -234,19 +378,20 @@ export default function App() {
 
   // Auto-toggle visuals pane on getting first visualization or when count increases
   useEffect(() => {
-    const chartCount = messages.filter(m => !!m.chart_url).length;
+    const chartCount = uniqueCharts.length;
     if (chartCount > prevChartCount) {
       setIsVisualsOpen(true);
     } else if (chartCount === 0) {
       setIsVisualsOpen(false);
     }
     setPrevChartCount(chartCount);
-  }, [messages]);
+  }, [uniqueCharts, prevChartCount]);
 
-  const fetchSessionData = async (sessionId: string) => {
+  const fetchSessionData = async (sessionId: string, threadId: string = "default") => {
     try {
+      const sessionIdWithThread = threadId === "default" ? sessionId : `${sessionId}:${threadId}`;
       // Fetch messages
-      const msgRes = await fetch(`${API_BASE}/sessions/${sessionId}/messages`);
+      const msgRes = await fetch(`${API_BASE}/sessions/${sessionIdWithThread}/messages`);
       if (msgRes.ok) {
         const msgs: Message[] = await msgRes.json();
         setMessages(msgs);
@@ -255,7 +400,7 @@ export default function App() {
       }
 
       // Fetch dataset info
-      const dsRes = await fetch(`${API_BASE}/sessions/${sessionId}/dataset`);
+      const dsRes = await fetch(`${API_BASE}/sessions/${sessionId.split(":")[0]}/dataset`);
       if (dsRes.ok) {
         const dsData = await dsRes.json();
         setDataset(dsData);
@@ -267,9 +412,7 @@ export default function App() {
     }
   };
 
-  const handleDeleteSession = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!confirm("Are you sure you want to delete this session?")) return;
+  const confirmDeleteSession = async (id: string) => {
     try {
       const res = await fetch(`${API_BASE}/sessions/${id}`, { method: "DELETE" });
       if (res.ok) {
@@ -281,6 +424,41 @@ export default function App() {
     } catch (err) {
       console.error("Error deleting session:", err);
     }
+  };
+
+  const handleDeleteSession = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setDeleteConfirm({
+      isOpen: true,
+      title: "Delete Workspace",
+      description: "Are you sure you want to delete this workspace session? This will permanently delete all session history and uploaded datasets.",
+      onConfirm: () => confirmDeleteSession(id)
+    });
+  };
+
+  const confirmDeleteChart = async (messageId: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/messages/${messageId}/chart`, { method: "DELETE" });
+      if (res.ok) {
+        setMessages(prev => prev.map(m => {
+          if (m.id === messageId) {
+            return { ...m, chart_url: undefined, chart_summary: undefined };
+          }
+          return m;
+        }));
+      }
+    } catch (err) {
+      console.error("Error deleting chart:", err);
+    }
+  };
+
+  const handleDeleteChart = (messageId: string) => {
+    setDeleteConfirm({
+      isOpen: true,
+      title: "Delete Visualization",
+      description: "Are you sure you want to delete this visualization from your analytics history?",
+      onConfirm: () => confirmDeleteChart(messageId)
+    });
   };
 
   const performUpload = (file: File) => {
@@ -333,7 +511,7 @@ export default function App() {
       fetchSessionData(selectedSessionId);
     } catch (err: any) {
       console.error("Upload error:", err);
-      alert(err.message || "An error occurred during file upload.");
+      showNotification("error", "Upload Error", err.message || "An error occurred during file upload.");
     } finally {
       setIsUploading(false);
       setUploadProgress(null);
@@ -344,7 +522,7 @@ export default function App() {
   const handleSqlConnect = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!dbHost.trim() || !dbPort.trim() || !dbName.trim() || !dbUser.trim() || !dbPass.trim() || !dbTable.trim() || !selectedSessionId) {
-      alert("Please fill in all database fields.");
+      showNotification("error", "Incomplete Form", "Please fill in all database fields.");
       return;
     }
 
@@ -380,11 +558,11 @@ export default function App() {
         setDbTable("");
       } else {
         const errData = await res.json();
-        alert(errData.detail || "Database connection failed.");
+        showNotification("error", "Connection Failed", errData.detail || "Database connection failed.");
       }
     } catch (err) {
       console.error("DB connection error:", err);
-      alert("An error occurred connecting to database.");
+      showNotification("error", "Connection Error", "An error occurred connecting to database.");
     } finally {
       setIsConnectingDb(false);
     }
@@ -410,7 +588,7 @@ export default function App() {
     const validExts = [".csv", ".json", ".xls", ".xlsx"];
     const fileExt = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
     if (!validExts.includes(fileExt)) {
-      alert("Unsupported file format. Please drop a CSV, JSON, or Excel file.");
+      showNotification("error", "Unsupported Format", "Unsupported file format. Please drop a CSV, JSON, or Excel file.");
       return;
     }
 
@@ -423,7 +601,7 @@ export default function App() {
       fetchSessionData(selectedSessionId);
     } catch (err: any) {
       console.error("Upload error:", err);
-      alert(err.message || "An error occurred during file upload.");
+      showNotification("error", "Upload Error", err.message || "An error occurred during file upload.");
     } finally {
       setIsUploading(false);
       setUploadProgress(null);
@@ -434,12 +612,14 @@ export default function App() {
     if (!userQuestion.trim() || !selectedSessionId || isQuerying) return;
 
     setIsQuerying(true);
+    setActiveQuestion(userQuestion);
 
     // Optimistically add user question to UI
     const tempUserMsg: Message = {
       id: Date.now().toString(),
       role: "user",
       content: userQuestion,
+      chart_url: selectedDiagram ? selectedDiagram.chartUrl : undefined,
       created_at: new Date().toISOString()
     };
     setMessages(prev => [...prev, tempUserMsg]);
@@ -453,11 +633,15 @@ export default function App() {
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
+    const sessionIdWithThread = activeThreadId === "default" ? selectedSessionId : `${selectedSessionId}:${activeThreadId}`;
     try {
-      const res = await fetch(`${API_BASE}/sessions/${selectedSessionId}/query`, {
+      const res = await fetch(`${API_BASE}/sessions/${sessionIdWithThread}/query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: apiQuestion }),
+        body: JSON.stringify({ 
+          question: apiQuestion,
+          chart_url: selectedDiagram ? selectedDiagram.chartUrl : undefined
+        }),
         signal: controller.signal
       });
 
@@ -493,7 +677,7 @@ export default function App() {
         }, 35);
       } else {
         const errData = await res.json();
-        alert(errData.detail || "Calculation execution failed.");
+        showNotification("error", "Execution Failed", errData.detail || "Calculation execution failed.");
       }
     } catch (err: any) {
       if (err.name !== "AbortError") {
@@ -524,9 +708,8 @@ export default function App() {
     }
   };
 
-  const handleClearWorkspaceChat = async () => {
+  const confirmClearWorkspaceChat = async () => {
     if (!selectedSessionId) return;
-    if (!confirm("Are you sure you want to clear all messages in this workspace?")) return;
     try {
       const res = await fetch(`${API_BASE}/sessions/${selectedSessionId}/messages`, {
         method: "DELETE"
@@ -537,6 +720,15 @@ export default function App() {
     } catch (err) {
       console.error("Error clearing chat:", err);
     }
+  };
+
+  const handleClearWorkspaceChat = () => {
+    setDeleteConfirm({
+      isOpen: true,
+      title: "Clear Chat Room",
+      description: "Are you sure you want to clear all messages in this workspace? This will permanently delete your conversational history.",
+      onConfirm: () => confirmClearWorkspaceChat()
+    });
   };
 
   const handleExportChatHistory = () => {
@@ -563,7 +755,14 @@ export default function App() {
 
   const renderMessageContent = (content: string) => {
     if (!content) return null;
-    const lines = content.split("\n");
+    let displayContent = content;
+    if (content.startsWith("[Context: Regarding the chart")) {
+      const splitParts = content.split("User follow-up question: ");
+      if (splitParts.length > 1) {
+        displayContent = splitParts.slice(1).join("User follow-up question: ");
+      }
+    }
+    const lines = displayContent.split("\n");
     return lines.map((line, lineIdx) => {
       const parts = line.split(/\*\*([^*]+)\*\*/g);
       return (
@@ -584,7 +783,7 @@ export default function App() {
   );
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-[#09090b] text-[#f4f4f5] overflow-hidden select-none relative">
+    <div className="flex flex-col h-screen w-screen bg-[#09090b] text-[#f4f4f5] overflow-hidden relative">
       <style>{`
         @keyframes fadeIn {
           from { opacity: 0; transform: translateY(4px); }
@@ -593,13 +792,27 @@ export default function App() {
         .animate-fade-in {
           animation: fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
         }
+        @keyframes slideInRight {
+          from { transform: translateX(100%); }
+          to { transform: translateX(0); }
+        }
+        .animate-slide-in-right {
+          animation: slideInRight 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
       `}</style>
       
       {/* 1. TOP MENU BAR (Google Colab style) */}
       <div className="h-14 border-b border-[#27272a] bg-[#121214] flex items-center justify-between px-4 shrink-0 z-30">
         <div className="flex items-center gap-3">
-          {/* Orange DA logo (Colab CO logo feel) - Enlarged */}
-          <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-[#e58a2d] text-white font-extrabold text-sm select-none shadow-md">
+          {/* Orange DA logo (Colab CO logo feel) - Clickable home link */}
+          <div 
+            onClick={() => {
+              setSelectedSessionId(null);
+              setActiveThreadId("default");
+            }}
+            className="flex items-center justify-center w-9 h-9 rounded-lg bg-[#e58a2d] text-white font-extrabold text-sm select-none shadow-md cursor-pointer hover:bg-[#d67b22] transition-colors"
+            title="Go to Home"
+          >
             DA
           </div>
           <div className="flex flex-col">
@@ -708,7 +921,7 @@ export default function App() {
                         if (selectedSessionId) {
                           setShowSqlModal(true);
                         } else {
-                          alert("Please open a workspace first!");
+                          showNotification("error", "Workspace Required", "Please open a workspace first!");
                         }
                         setActiveNavMenu(null);
                       }}
@@ -720,7 +933,7 @@ export default function App() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        alert("DuckDB memory sandbox database is active for raw data analysis queries.");
+                        showNotification("info", "DuckDB Sandbox", "DuckDB memory sandbox database is active for raw data analysis queries.");
                         setActiveNavMenu(null);
                       }}
                       className="w-full text-left px-3.5 py-2.5 hover:bg-[#27272a] hover:text-white flex items-center gap-2 font-medium"
@@ -776,7 +989,9 @@ export default function App() {
         }`}>
           
           {/* LEFT SIDEBAR - SESSIONS NAVIGATION */}
-          <div className="w-64 border-r border-[#27272a] bg-[#121214] flex flex-col shrink-0">
+          <div className={`w-full md:w-48 border-r border-[#27272a] bg-[#121214] flex-col shrink-0 ${
+            activeMobileTab === "workspaces" ? "flex" : "hidden md:flex"
+          }`}>
             <div className="p-4 border-b border-[#27272a] flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-white animate-pulse" />
               <span className="font-semibold text-sm bg-gradient-to-r from-white via-zinc-200 to-zinc-400 bg-clip-text text-transparent">
@@ -785,96 +1000,302 @@ export default function App() {
             </div>
             
             <div className="flex-1 overflow-y-auto p-2 space-y-1">
-              {sessions.map((s) => (
-                <div
-                  key={s.id}
-                  onClick={() => {
-                    if (editingSessionId !== s.id) {
-                      setSelectedSessionId(s.id);
-                    }
-                  }}
-                  className={`flex items-center justify-between p-2.5 rounded-lg text-sm cursor-pointer group transition-all duration-200 relative ${
-                    selectedSessionId === s.id 
-                      ? "bg-white text-black font-semibold shadow-md border border-white" 
-                      : "hover:bg-[#1c1c1f] text-zinc-400 border border-transparent"
-                  }`}
-                >
-                  <div className="flex items-center gap-2 truncate flex-1 pr-1">
-                    <MessageSquare className={`w-4 h-4 shrink-0 ${selectedSessionId === s.id ? "text-black" : "text-zinc-550"}`} />
-                    {editingSessionId === s.id ? (
-                      <input
-                        type="text"
-                        value={editingTitle}
-                        onChange={(e) => setEditingTitle(e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && editingTitle.trim()) {
-                            handleRenameSession(s.id, editingTitle);
-                            setEditingSessionId(null);
-                          } else if (e.key === "Escape") {
-                            setEditingSessionId(null);
-                          }
-                        }}
-                        className={`border rounded px-1.5 py-0.5 text-xs focus:outline-none w-full ${
-                          selectedSessionId === s.id ? "bg-zinc-100 border-zinc-300 text-black" : "bg-black border-zinc-800 text-white"
-                        }`}
-                        autoFocus
-                      />
-                    ) : (
-                      <span className="truncate">{s.title}</span>
-                    )}
-                  </div>
-                  
-                  {editingSessionId !== s.id && (
-                    <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        onClick={() => setSessionMenuId(sessionMenuId === s.id ? null : s.id)}
-                        className={`opacity-0 group-hover:opacity-100 p-1 rounded transition duration-200 ${
-                          selectedSessionId === s.id ? "text-black hover:bg-zinc-200" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
-                        }`}
-                      >
-                        <MoreVertical className="w-3.5 h-3.5" />
-                      </button>
-                      {sessionMenuId === s.id && (
-                        <div className="absolute right-0 mt-1 w-36 bg-[#121214] border border-[#27272a] rounded-lg shadow-xl py-1 z-50 text-xs text-[#e4e4e7]">
-                          <button
-                            onClick={() => {
-                              setEditingSessionId(s.id);
-                              setEditingTitle(s.title);
-                              setSessionMenuId(null);
+              {sessions.map((s) => {
+                const isSelected = selectedSessionId === s.id;
+                return (
+                  <div key={s.id} className="space-y-1">
+                    <div
+                      onClick={() => {
+                        if (editingSessionId !== s.id) {
+                          setSelectedSessionId(s.id);
+                        }
+                      }}
+                      className={`flex items-center justify-between p-2.5 rounded-lg text-sm cursor-pointer group transition-all duration-200 relative ${
+                        isSelected 
+                          ? "bg-white text-black font-semibold shadow-md border border-white" 
+                          : "hover:bg-[#1c1c1f] text-zinc-400 border border-transparent"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 truncate flex-1 pr-1">
+                        <MessageSquare className={`w-4 h-4 shrink-0 ${isSelected ? "text-black" : "text-zinc-500"}`} />
+                        {editingSessionId === s.id ? (
+                          <input
+                            type="text"
+                            value={editingTitle}
+                            onChange={(e) => setEditingTitle(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && editingTitle.trim()) {
+                                handleRenameSession(s.id, editingTitle);
+                                setEditingSessionId(null);
+                              } else if (e.key === "Escape") {
+                                setEditingSessionId(null);
+                              }
                             }}
-                            className="w-full text-left px-3 py-1.5 hover:bg-[#27272a] hover:text-white flex items-center gap-1.5"
-                          >
-                            <Edit3 className="w-3 h-3" />
-                            Rename
-                          </button>
+                            className={`border rounded px-1.5 py-0.5 text-xs focus:outline-none w-full ${
+                              isSelected ? "bg-zinc-100 border-zinc-300 text-black" : "bg-black border-zinc-800 text-white"
+                            }`}
+                            autoFocus
+                          />
+                        ) : (
+                          <span className="truncate">{s.title}</span>
+                        )}
+                      </div>
+                      
+                      {editingSessionId !== s.id && (
+                        <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
                           <button
-                            onClick={() => {
-                              navigator.clipboard.writeText(s.id);
-                              setCopiedSessionId(s.id);
-                              setTimeout(() => setCopiedSessionId(null), 1500);
-                            }}
-                            className="w-full text-left px-3 py-1.5 hover:bg-[#27272a] hover:text-white flex items-center gap-1.5"
+                            onClick={() => setSessionMenuId(sessionMenuId === s.id ? null : s.id)}
+                            className={`opacity-0 group-hover:opacity-100 p-1 rounded transition duration-200 ${
+                              isSelected ? "text-black hover:bg-zinc-200" : "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                            }`}
                           >
-                            <FileText className="w-3 h-3" />
-                            {copiedSessionId === s.id ? "Copied!" : "Copy ID"}
+                            <MoreVertical className="w-3.5 h-3.5" />
                           </button>
-                          <button
-                            onClick={(e) => {
-                              handleDeleteSession(s.id, e);
-                              setSessionMenuId(null);
-                            }}
-                            className="w-full text-left px-3 py-1.5 hover:bg-[#27272a] text-red-400 hover:text-red-300 flex items-center gap-1.5 border-t border-[#27272a] mt-1"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                            Delete
-                          </button>
+                          {sessionMenuId === s.id && (
+                            <div className="absolute right-0 mt-1 w-36 bg-[#121214] border border-[#27272a] rounded-lg shadow-xl py-1 z-50 text-xs text-[#e4e4e7]">
+                              <button
+                                onClick={() => {
+                                  setEditingSessionId(s.id);
+                                  setEditingTitle(s.title);
+                                  setSessionMenuId(null);
+                                }}
+                                className="w-full text-left px-3 py-1.5 hover:bg-[#27272a] hover:text-white flex items-center gap-1.5"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                                Rename
+                              </button>
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(s.id);
+                                  setCopiedSessionId(s.id);
+                                  setTimeout(() => setCopiedSessionId(null), 1500);
+                                }}
+                                className="w-full text-left px-3 py-1.5 hover:bg-[#27272a] hover:text-white flex items-center gap-1.5"
+                              >
+                                <FileText className="w-3 h-3" />
+                                {copiedSessionId === s.id ? "Copied!" : "Copy ID"}
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  handleDeleteSession(s.id, e);
+                                  setSessionMenuId(null);
+                                }}
+                                className="w-full text-left px-3 py-1.5 hover:bg-[#27272a] text-red-400 hover:text-red-300 flex items-center gap-1.5 border-t border-[#27272a] mt-1"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                Delete
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
-                  )}
-                </div>
-              ))}
+
+                    {/* If selected, list its threads/chats! */}
+                    {isSelected && (
+                      <div className="pl-3.5 pr-1 py-1.5 space-y-1 border-l border-zinc-800 ml-3.5 mt-1 mb-2 animate-fade-in select-none">
+                        <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Chats / Threads</div>
+                        
+                        {/* Default General Chat */}
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveThreadId("default");
+                          }}
+                          className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs cursor-pointer transition ${
+                            activeThreadId === "default" 
+                              ? "bg-zinc-800 text-white font-medium" 
+                              : "text-zinc-400 hover:text-white hover:bg-zinc-900/60"
+                          }`}
+                        >
+                          <MessageSquare className="w-3 h-3 shrink-0 text-zinc-550" />
+                          <span className="truncate">General Chat</span>
+                        </div>
+
+                        {/* Custom Threads */}
+                        {(threads[s.id] || []).map((t) => {
+                          const isDeleting = deletingThreadId === t.id;
+                          return (
+                            <div key={t.id} className="space-y-1">
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (editingThreadId !== t.id) {
+                                    setActiveThreadId(t.id);
+                                  }
+                                }}
+                                className={`flex items-center justify-between group/thread px-2 py-1.5 rounded-md text-xs cursor-pointer transition ${
+                                  activeThreadId === t.id 
+                                    ? "bg-zinc-800 text-white font-medium" 
+                                    : "text-zinc-400 hover:text-white hover:bg-zinc-900/60"
+                                }`}
+                              >
+                                {editingThreadId === t.id ? (
+                                  <input
+                                    type="text"
+                                    value={editingThreadTitle}
+                                    onChange={(e) => setEditingThreadTitle(e.target.value)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter" && editingThreadTitle.trim()) {
+                                        const updated = (threads[s.id] || []).map(item => 
+                                          item.id === t.id ? { ...item, title: editingThreadTitle.trim() } : item
+                                        );
+                                        setThreads({ ...threads, [s.id]: updated });
+                                        setEditingThreadId(null);
+                                      } else if (e.key === "Escape") {
+                                        setEditingThreadId(null);
+                                      }
+                                    }}
+                                    onBlur={() => setEditingThreadId(null)}
+                                    className="bg-black border border-zinc-700 rounded px-1 py-0.5 text-xs text-white focus:outline-none w-full"
+                                    autoFocus
+                                  />
+                                ) : (
+                                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                    <MessageSquare className="w-3 h-3 shrink-0 text-zinc-555" />
+                                    <span className="truncate">{t.title}</span>
+                                  </div>
+                                )}
+                                
+                                {editingThreadId !== t.id && !isDeleting && (
+                                  <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover/thread:opacity-100 transition-opacity">
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setEditingThreadId(t.id);
+                                        setEditingThreadTitle(t.title);
+                                      }}
+                                      className="p-0.5 rounded hover:text-zinc-350 text-zinc-500 transition"
+                                      title="Rename Thread"
+                                    >
+                                      <Edit3 className="w-3 h-3" />
+                                    </button>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setDeletingThreadId(t.id);
+                                      }}
+                                      className="p-0.5 rounded hover:text-red-400 text-zinc-500 transition"
+                                      title="Delete Thread"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Confirm delete sliding/unfolding directly beneath */}
+                              <div className={`overflow-hidden transition-all duration-300 ${
+                                isDeleting ? "max-h-20 mt-1 opacity-100 animate-fade-in" : "max-h-0 opacity-0 pointer-events-none"
+                              }`}>
+                                <div className="bg-[#1a1212] border border-red-950/30 p-1.5 rounded-md flex flex-col gap-1.5">
+                                  <span className="text-[10px] text-red-300 font-semibold text-center leading-tight">Delete thread?</span>
+                                  <div className="flex items-center justify-center gap-1.5">
+                                    <button
+                                      onClick={async (e) => {
+                                        e.stopPropagation();
+                                        const updated = (threads[s.id] || []).filter(item => item.id !== t.id);
+                                        setThreads({ ...threads, [s.id]: updated });
+                                        if (activeThreadId === t.id) {
+                                          setActiveThreadId("default");
+                                        }
+                                        setDeletingThreadId(null);
+                                        try {
+                                          await fetch(`${API_BASE}/sessions/${s.id}:${t.id}/messages`, { method: "DELETE" });
+                                        } catch (err) {
+                                          console.error("Error deleting thread backend:", err);
+                                        }
+                                      }}
+                                      className="text-[9px] font-bold uppercase tracking-wider bg-red-650 hover:bg-red-500 text-white px-2.5 py-1 rounded transition"
+                                    >
+                                      Delete
+                                    </button>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setDeletingThreadId(null);
+                                      }}
+                                      className="text-[9px] font-bold uppercase tracking-wider bg-zinc-800 hover:bg-zinc-700 text-zinc-350 px-2.5 py-1 rounded transition"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+
+                        {/* Inline New Thread input / trigger */}
+                        {showNewThreadInput ? (
+                          <div className="px-2 py-1 flex items-center gap-1.5 bg-black border border-zinc-800 rounded-md animate-fade-in" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="text"
+                              value={newThreadName}
+                              onChange={(e) => setNewThreadName(e.target.value)}
+                              placeholder="Thread name..."
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" && newThreadName.trim()) {
+                                  const newId = `thread-${Date.now()}`;
+                                  const currentThreads = threads[s.id] || [];
+                                  const updated = [...currentThreads, { id: newId, title: newThreadName.trim() }];
+                                  setThreads({ ...threads, [s.id]: updated });
+                                  setActiveThreadId(newId);
+                                  setNewThreadName("");
+                                  setShowNewThreadInput(false);
+                                } else if (e.key === "Escape") {
+                                  setShowNewThreadInput(false);
+                                  setNewThreadName("");
+                                }
+                              }}
+                              className="bg-transparent text-xs text-white focus:outline-none w-full placeholder-zinc-700 font-mono"
+                              autoFocus
+                            />
+                            <button
+                              onClick={() => {
+                                if (newThreadName.trim()) {
+                                  const newId = `thread-${Date.now()}`;
+                                  const currentThreads = threads[s.id] || [];
+                                  const updated = [...currentThreads, { id: newId, title: newThreadName.trim() }];
+                                  setThreads({ ...threads, [s.id]: updated });
+                                  setActiveThreadId(newId);
+                                  setNewThreadName("");
+                                  setShowNewThreadInput(false);
+                                }
+                              }}
+                              className="text-emerald-500 hover:text-emerald-400 font-bold text-xs"
+                            >
+                              ✓
+                            </button>
+                            <button
+                              onClick={() => {
+                                setShowNewThreadInput(false);
+                                setNewThreadName("");
+                              }}
+                              className="text-red-500 hover:text-red-400 font-bold text-xs"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowNewThreadInput(true);
+                            }}
+                            className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs text-[#a1a1aa] hover:text-white transition hover:bg-zinc-900/30 text-left font-semibold"
+                          >
+                            <Plus className="w-3 h-3 shrink-0" />
+                            <span>New Thread...</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               {sessions.length === 0 && (
                 <div className="text-center text-xs text-zinc-500 mt-8">
                   No sessions created yet.
@@ -884,15 +1305,17 @@ export default function App() {
           </div>
 
           {/* THE 30-40-30 PANELS */}
-          <div className="flex flex-1 overflow-hidden">
+          <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
             
-            {/* PANE 1: LEFT WORKSPACE/PROFILER (30%) */}
+            {/* PANE 1: LEFT WORKSPACE/PROFILER (24%) */}
             <div 
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
-              className={`w-[30%] border-r border-[#27272a] bg-[#121214] flex flex-col overflow-hidden relative ${
+              className={`w-full md:w-[24%] border-r border-[#27272a] bg-[#121214] flex-col overflow-hidden relative ${
                 isDragging ? "border-dashed border-white bg-zinc-900/60" : ""
+              } ${
+                activeMobileTab === "schema" ? "flex" : "hidden md:flex"
               }`}
             >
               {/* Hidden file input */}
@@ -963,39 +1386,82 @@ export default function App() {
                     </div>
                   )}
                 </div>
-                {dataset && (
-                  <button
-                    onClick={() => setShowDeleteConfirmModal(true)}
-                    className="text-[10px] font-bold uppercase tracking-wider text-red-400 hover:text-red-350 hover:bg-red-950/20 px-2.5 py-1 bg-[#1c1c1f] border border-[#27272a] hover:border-red-900 rounded-md transition shrink-0"
-                  >
-                    Delete Source
-                  </button>
-                )}
               </div>
 
               <div className="flex-1 overflow-y-auto p-4 flex flex-col">
                 {dataset && dataset.schema_json ? (
                   <div className="space-y-5">
-                    <div 
-                      onClick={() => window.open(`${API_BASE}/sessions/${selectedSessionId}/dataset/view`, '_blank')}
-                      className="flex items-center justify-between gap-2 mb-4 bg-[#1c1c1f] p-3 rounded-lg border border-[#27272a] hover:border-zinc-500 hover:bg-[#202024] relative group cursor-pointer transition-all duration-300"
-                      title="Open dataset in new tab"
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <FileText className="w-5 h-5 text-zinc-300 shrink-0" />
-                        <div className="min-w-0">
-                          <div className="text-white text-sm font-medium truncate max-w-[150px]">
-                            {dataset.file_name}
-                          </div>
-                          <div className="text-xs text-zinc-400">
-                            {dataset.schema_json.total_rows?.toLocaleString() || "0"} total rows loaded
+                    <div className="mb-4">
+                      <div 
+                        onClick={() => window.open(`${API_BASE}/sessions/${selectedSessionId}/dataset/view`, '_blank')}
+                        className="flex items-center justify-between gap-2 bg-[#1c1c1f] p-3 rounded-lg border border-[#27272a] hover:border-zinc-500 hover:bg-[#202024] relative group cursor-pointer transition-all duration-300"
+                        title="Open dataset in new tab"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileText className="w-5 h-5 text-zinc-300 shrink-0" />
+                          <div className="min-w-0">
+                            <div className="text-white text-sm font-medium truncate max-w-[150px]">
+                              {dataset.file_name}
+                            </div>
+                            <div className="text-xs text-zinc-400">
+                              {dataset.schema_json.total_rows?.toLocaleString() || "0"} total rows loaded
+                            </div>
                           </div>
                         </div>
+                        
+                        <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <div 
+                            onClick={() => window.open(`${API_BASE}/sessions/${selectedSessionId}/dataset/view`, '_blank')}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center gap-1 bg-zinc-800 border border-zinc-700 px-2 py-1 rounded text-[9px] text-zinc-300 font-semibold uppercase tracking-wider cursor-pointer"
+                          >
+                            <span>Open</span>
+                            <ChevronRight className="w-3 h-3" />
+                          </div>
+                          
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowInlineDeleteConfirm(true);
+                            }}
+                            className="p-1.5 bg-[#1c1c1f] hover:bg-red-950/30 text-zinc-400 hover:text-red-400 border border-[#27272a] hover:border-red-900 rounded-md transition"
+                            title="Delete Source"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
-                      
-                      <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center gap-1 bg-zinc-800 border border-zinc-700 px-2 py-1 rounded text-[9px] text-zinc-300 font-semibold uppercase tracking-wider shrink-0">
-                        <span>Open</span>
-                        <ChevronRight className="w-3 h-3" />
+
+                      {/* Confirm delete sliding/unfolding directly beneath */}
+                      <div className={`overflow-hidden transition-all duration-300 ${
+                        showInlineDeleteConfirm ? "max-h-24 mt-2 opacity-100 animate-fade-in" : "max-h-0 opacity-0 pointer-events-none"
+                      }`}>
+                        <div className="bg-[#1a1212] border border-red-950/30 p-2.5 rounded-lg flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2 text-red-400">
+                            <AlertTriangle className="w-4 h-4 shrink-0 text-red-400 animate-pulse" />
+                            <span className="text-[11px] font-semibold">Delete source dataset?</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                await handleDeleteDatasetSource();
+                                setShowInlineDeleteConfirm(false);
+                              }}
+                              className="text-[9px] font-bold uppercase tracking-wider bg-red-650 hover:bg-red-500 text-white px-2.5 py-1.5 rounded transition"
+                            >
+                              Confirm
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setShowInlineDeleteConfirm(false);
+                              }}
+                              className="text-[9px] font-bold uppercase tracking-wider bg-zinc-800 hover:bg-zinc-700 text-zinc-350 px-2.5 py-1.5 rounded transition"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
@@ -1016,9 +1482,14 @@ export default function App() {
                         return (
                           <div 
                             key={col} 
-                            onClick={() => setSelectedStatsCol(selectedStatsCol === col ? null : col)}
-                            onMouseEnter={() => setHoveredColumnAnomaly(col)}
-                            onMouseLeave={() => setHoveredColumnAnomaly(null)}
+                            onMouseEnter={() => {
+                              setHoveredColumnAnomaly(col);
+                              setSelectedStatsCol(col);
+                            }}
+                            onMouseLeave={() => {
+                              setHoveredColumnAnomaly(null);
+                              setSelectedStatsCol(null);
+                            }}
                             className={`p-3.5 rounded-xl border transition-all duration-300 cursor-pointer relative flex flex-col group ${
                               selectedStatsCol === col 
                                 ? "bg-[#1d1d22] border-amber-500 shadow-md shadow-amber-500/5" 
@@ -1049,47 +1520,65 @@ export default function App() {
                             </div>
 
                             {/* Collateral Equal-spaced Grid for Descriptive Statistics + Null Rate */}
-                            {selectedStatsCol === col && (
-                              <div className="mt-3.5 pt-3 border-t border-[#27272a]/60 space-y-3 animate-fade-in select-text">
-                                <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
-                                  <div className="bg-black/35 border border-[#27272a]/70 rounded-lg p-2.5 flex flex-col">
-                                    <span className="text-[9px] uppercase tracking-wider text-zinc-500">Null Rate</span>
-                                    <span className="font-semibold text-zinc-300 mt-1 text-xs">{nullRate}</span>
-                                  </div>
-                                  {stats && (
-                                    <>
-                                      <div className="bg-black/35 border border-[#27272a]/70 rounded-lg p-2.5 flex flex-col">
-                                        <span className="text-[9px] uppercase tracking-wider text-zinc-500">Mean Value</span>
-                                        <span className="font-semibold text-zinc-300 mt-1 text-xs">{stats.mean}</span>
-                                      </div>
-                                      <div className="bg-black/35 border border-[#27272a]/70 rounded-lg p-2.5 flex flex-col">
-                                        <span className="text-[9px] uppercase tracking-wider text-zinc-500">Median</span>
-                                        <span className="font-semibold text-zinc-300 mt-1 text-xs">{stats.median}</span>
-                                      </div>
-                                      <div className="bg-black/35 border border-[#27272a]/70 rounded-lg p-2.5 flex flex-col">
-                                        <span className="text-[9px] uppercase tracking-wider text-zinc-500">Std Dev</span>
-                                        <span className="font-semibold text-zinc-300 mt-1 text-xs">{stats.std}</span>
-                                      </div>
-                                      <div className="bg-black/35 border border-[#27272a]/70 rounded-lg p-2.5 flex flex-col">
-                                        <span className="text-[9px] uppercase tracking-wider text-zinc-500">Min</span>
-                                        <span className="font-semibold text-zinc-300 mt-1 text-xs">{stats.min}</span>
-                                      </div>
-                                      <div className="bg-black/35 border border-[#27272a]/70 rounded-lg p-2.5 flex flex-col">
-                                        <span className="text-[9px] uppercase tracking-wider text-zinc-500">Max</span>
-                                        <span className="font-semibold text-zinc-300 mt-1 text-xs">{stats.max}</span>
-                                      </div>
-                                    </>
-                                  )}
+                            <div 
+                              className={`transition-all duration-300 ease-in-out overflow-hidden select-text ${
+                                selectedStatsCol === col 
+                                  ? "max-h-[500px] opacity-100 mt-3.5 pt-3 border-t border-[#27272a]/60 space-y-3" 
+                                  : "max-h-0 opacity-0 pointer-events-none"
+                              }`}
+                            >
+                              <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+                                <div className="bg-black/35 border border-[#27272a]/70 rounded-lg p-2.5 flex flex-col">
+                                  <span className="text-[9px] uppercase tracking-wider text-zinc-500">Null Rate</span>
+                                  <span className="font-semibold text-zinc-300 mt-1 text-xs">{nullRate}</span>
                                 </div>
-
-                                {hasAnomaly && (
-                                  <div className="flex items-start gap-2 p-2.5 bg-yellow-950/30 border border-yellow-800/40 rounded-lg text-[11px] text-yellow-300">
-                                    <AlertTriangle className="w-4 h-4 shrink-0 text-yellow-400 mt-0.5" />
-                                    <span className="leading-normal">{anomaly}</span>
-                                  </div>
+                                {stats && (
+                                  <>
+                                    <div className="bg-black/35 border border-[#27272a]/70 rounded-lg p-2.5 flex flex-col">
+                                      <span className="text-[9px] uppercase tracking-wider text-zinc-500">Mean Value</span>
+                                      <span className="font-semibold text-zinc-300 mt-1 text-xs">{stats.mean}</span>
+                                    </div>
+                                    <div className="bg-black/35 border border-[#27272a]/70 rounded-lg p-2.5 flex flex-col">
+                                      <span className="text-[9px] uppercase tracking-wider text-zinc-500">Median</span>
+                                      <span className="font-semibold text-zinc-300 mt-1 text-xs">{stats.median}</span>
+                                    </div>
+                                    <div className="bg-black/35 border border-[#27272a]/70 rounded-lg p-2.5 flex flex-col">
+                                      <span className="text-[9px] uppercase tracking-wider text-zinc-500">Std Dev</span>
+                                      <span className="font-semibold text-zinc-300 mt-1 text-xs">{stats.std}</span>
+                                    </div>
+                                    <div className="bg-black/35 border border-[#27272a]/70 rounded-lg p-2.5 flex flex-col">
+                                      <span className="text-[9px] uppercase tracking-wider text-zinc-500">Min</span>
+                                      <span className="font-semibold text-zinc-300 mt-1 text-xs">{stats.min}</span>
+                                    </div>
+                                    <div className="bg-black/35 border border-[#27272a]/70 rounded-lg p-2.5 flex flex-col">
+                                      <span className="text-[9px] uppercase tracking-wider text-zinc-500">Max</span>
+                                      <span className="font-semibold text-zinc-300 mt-1 text-xs">{stats.max}</span>
+                                    </div>
+                                  </>
                                 )}
                               </div>
-                            )}
+
+                              {hasAnomaly && (
+                                <div className="flex items-start gap-2 p-2.5 bg-yellow-950/30 border border-yellow-800/40 rounded-lg text-[11px] text-yellow-300">
+                                  <AlertTriangle className="w-4 h-4 shrink-0 text-yellow-400 mt-0.5" />
+                                  <span className="leading-normal">{anomaly}</span>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Inline hover reveal for anomaly */}
+                            <div 
+                              className={`transition-all duration-300 ease-in-out overflow-hidden ${
+                                hasAnomaly && hoveredColumnAnomaly === col && selectedStatsCol !== col 
+                                  ? "max-h-[150px] opacity-100 mt-2.5 pt-2.5 border-t border-amber-900/30" 
+                                  : "max-h-0 opacity-0 pointer-events-none"
+                              }`}
+                            >
+                              <div className="flex items-start gap-2 p-2 bg-[#1c1410] border border-amber-950/20 rounded-lg text-[11px] text-amber-300">
+                                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-500 mt-0.5" />
+                                <span className="leading-normal">{anomaly}</span>
+                              </div>
+                            </div>
                           </div>
                         );
                       })}
@@ -1125,12 +1614,14 @@ export default function App() {
             </div>
             
             {/* PANE 2: MIDDLE CONVERSATIONAL CHAT (Resizes dynamically) */}
-            <div className="flex-1 min-w-[30%] border-r border-[#27272a] bg-[#09090b] flex flex-col overflow-hidden">
+            <div className={`flex-1 min-w-full md:min-w-[30%] border-r border-[#27272a] bg-[#09090b] flex-col overflow-hidden ${
+              activeMobileTab === "chat" ? "flex" : "hidden md:flex"
+            }`}>
               <div className="p-4 border-b border-[#27272a] bg-[#121214] flex items-center justify-between">
                 <h2 className="font-semibold text-white">Analysis Room</h2>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              <div className="flex-1 overflow-y-auto p-4 pb-20 space-y-4">
                 {/* Default welcome guide chat background when no session is selected */}
                 {!selectedSessionId || messages.length === 0 ? (
                   <div className="space-y-4">
@@ -1152,6 +1643,22 @@ export default function App() {
                 ) : (
                   messages.map((m, idx) => (
                     <div key={m.id || `msg-${idx}`} className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}>
+                      {m.role === "user" && m.content.startsWith("[Context: Regarding the chart") && (() => {
+                        const repliedChartUrl = findRepliedChartUrl(m.content);
+                        return (
+                          <div className="flex items-center gap-2 mb-1.5 self-end select-none">
+                            <span className="text-zinc-500 text-sm font-semibold">↳</span>
+                            {repliedChartUrl && (
+                              <img 
+                                src={repliedChartUrl} 
+                                alt="Replied chart" 
+                                className="w-16 h-12 object-contain rounded-lg bg-black border border-[#27272a] shrink-0 cursor-zoom-in hover:scale-105 transition-transform"
+                                onClick={() => setZoomedChartUrl(repliedChartUrl)}
+                              />
+                            )}
+                          </div>
+                        );
+                      })()}
                       <div className={`max-w-[90%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                         m.role === "user" ? "bg-white text-black rounded-br-none font-medium shadow-md" : "bg-[#1c1c1f] border border-[#27272a] text-zinc-200 rounded-bl-none"
                       }`}>
@@ -1196,10 +1703,11 @@ export default function App() {
                 )}
                 {isQuerying && !streamingMsgId && (
                   <div className="flex flex-col items-start animate-fade-in">
-                    <div className="bg-[#1c1c1f] border border-[#27272a] text-zinc-400 rounded-2xl rounded-bl-none px-4 py-3 text-sm flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '0ms' }} />
-                      <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '150ms' }} />
-                      <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+                    <div className="bg-[#1c1c1f] border border-[#27272a] text-zinc-350 rounded-2xl rounded-bl-none px-4 py-3.5 text-sm flex items-center gap-2.5">
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span className="font-semibold">
+                        {isVisualQuery(activeQuestion) ? "Visualizing & Plotting..." : "Analyzing & Processing..."}
+                      </span>
                     </div>
                   </div>
                 )}
@@ -1208,17 +1716,31 @@ export default function App() {
 
               <form onSubmit={handleAskQuestion} className="p-4 pb-7 border-t border-[#27272a] bg-[#121214]">
                 {selectedDiagram && (
-                  <div className="mb-2 flex items-center justify-between bg-[#1c1c1f] border border-[#27272a] rounded-lg px-3 py-1.5 text-[11px] text-zinc-300">
-                    <div className="flex items-center gap-1.5 truncate pr-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse shrink-0" />
-                      <span className="truncate">Replying to: <strong className="text-white font-medium">"{selectedDiagram.summary || selectedDiagram.question}"</strong></span>
+                  <div className="mb-2.5 flex items-center justify-between bg-[#1c1c1f] border border-zinc-800 rounded-xl p-2.5 text-[11px] text-zinc-350 gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      {selectedDiagram.chartUrl && (
+                        <img 
+                          src={selectedDiagram.chartUrl} 
+                          alt="Replying to chart" 
+                          className="w-10 h-10 object-contain rounded bg-black border border-zinc-800 shrink-0"
+                        />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 text-zinc-400 font-medium">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#e58a2d] animate-pulse shrink-0" />
+                          <span>Replying to Visualization</span>
+                        </div>
+                        <div className="text-white font-bold truncate text-[11px] mt-0.5">
+                          {selectedDiagram.summary || selectedDiagram.question}
+                        </div>
+                      </div>
                     </div>
                     <button 
                       type="button" 
                       onClick={() => setSelectedDiagram(null)}
-                      className="text-zinc-400 hover:text-white transition font-mono shrink-0 uppercase tracking-wider text-[9px] font-bold"
+                      className="text-zinc-400 hover:text-white transition font-mono shrink-0 uppercase tracking-wider text-[9px] font-bold bg-zinc-800 px-2.5 py-1 rounded-md"
                     >
-                      [Clear]
+                      Cancel
                     </button>
                   </div>
                 )}
@@ -1253,40 +1775,21 @@ export default function App() {
                   )}
                 </div>
               </form>
-              {/* Anomalies Bottom Drawer */}
-              {hoveredColumnAnomaly && dataset && dataset.schema_json && (
-                (() => {
-                  const col = hoveredColumnAnomaly;
-                  const anomaly = dataset.schema_json.anomalies?.[col] || "No statistical anomalies detected.";
-                  
-                  return (
-                    <div 
-                      className="absolute bottom-0 left-0 right-0 h-[140px] bg-[#1a1410]/95 backdrop-blur-md border-t border-amber-600/50 shadow-2xl z-40 transition-all duration-300 transform translate-y-0 flex flex-col p-4 animate-slide-up"
-                    >
-                      <div className="flex items-start gap-2.5">
-                        <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5 animate-pulse" />
-                        <div className="space-y-1">
-                          <div className="text-xs font-bold text-amber-400 uppercase tracking-wider font-mono">
-                            Anomaly Status &mdash; Column "{col}"
-                          </div>
-                          <p className="text-sm text-amber-200/90 leading-relaxed font-sans">
-                            {anomaly}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()
-              )}
             </div>
 
             {/* PANE 3: RIGHT VISUALS PERSISTENT VIEWPORT */}
             <div 
-              className={`transition-all duration-300 ease-in-out flex flex-col overflow-hidden shrink-0 border-l border-[#27272a] ${
-                isVisualsOpen ? "w-[30%] min-w-[280px] bg-[#09090b]" : "w-12 bg-[#121214] hover:bg-[#1c1c1f] cursor-pointer"
+              className={`transition-all duration-300 ease-in-out flex-col overflow-hidden shrink-0 border-l border-[#27272a] ${
+                activeMobileTab === "visuals" 
+                  ? "w-full bg-[#09090b] flex" 
+                  : (isVisualsOpen 
+                      ? "w-full md:w-[38%] md:min-w-[320px] bg-[#09090b] flex" 
+                      : "w-12 bg-[#121214] hover:bg-[#1c1c1f] cursor-pointer hidden md:flex")
+              } ${
+                activeMobileTab === "visuals" ? "flex" : "hidden md:flex"
               }`}
               onClick={() => {
-                if (!isVisualsOpen) {
+                if (!isVisualsOpen && activeMobileTab !== "visuals") {
                   setIsVisualsOpen(true);
                 }
               }}
@@ -1308,9 +1811,9 @@ export default function App() {
                   </div>
 
                   {/* Badging showing plot count */}
-                  {messages.filter(m => m.chart_url).length > 0 ? (
+                  {uniqueCharts.length > 0 ? (
                     <span className="text-[9px] font-bold font-mono bg-zinc-800 border border-zinc-700 text-zinc-350 px-2 py-0.5 rounded-full">
-                      {messages.filter(m => m.chart_url).length}
+                      {uniqueCharts.length}
                     </span>
                   ) : (
                     <div className="h-4 w-4 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center">
@@ -1326,9 +1829,9 @@ export default function App() {
                       <h2 className="font-semibold text-white">Visual Analytics</h2>
                     </div>
                     <div className="flex items-center gap-2">
-                      {messages.filter(m => m.chart_url).length > 0 && (
+                      {uniqueCharts.length > 0 && (
                         <span className="text-[10px] font-mono bg-zinc-900 border border-zinc-800 text-zinc-400 px-2 py-0.5 rounded-full">
-                          {messages.filter(m => m.chart_url).length} plots
+                          {uniqueCharts.length} plots
                         </span>
                       )}
                       <button 
@@ -1344,15 +1847,24 @@ export default function App() {
                     </div>
                   </div>
                   <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                    {messages.filter(m => m.chart_url).length > 0 ? (
-                      messages.filter(m => m.chart_url).map((m, cidx) => {
+                    {isQuerying && isVisualQuery(activeQuestion) && (
+                      <div className="bg-[#1c1c1f] border border-dashed border-zinc-700 rounded-xl p-4 flex flex-col items-center justify-center text-center space-y-3 animate-pulse">
+                        <Loader2 className="w-6 h-6 animate-spin text-amber-500" />
+                        <div className="space-y-1">
+                          <span className="text-xs font-bold text-white block">Generating Visualization...</span>
+                          <span className="text-[10px] text-zinc-500 font-mono">Running secure Docker sandbox code execution</span>
+                        </div>
+                      </div>
+                    )}
+                    {uniqueCharts.length > 0 ? (
+                      uniqueCharts.map((m, cidx) => {
                         const chartUrl = m.chart_url || "";
                         const fullUrl = chartUrl.startsWith("http") ? chartUrl : `http://localhost:8000${chartUrl}`;
                         const msgIdx = messages.findIndex(msg => msg.id === m.id);
                         const associatedQuestion = msgIdx > 0 ? messages[msgIdx - 1].content : "Data query visualization";
                         
                         const plotTitle = m.chart_summary ? m.chart_summary.split('.')[0] : associatedQuestion;
-                        const plotTime = new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        const plotTime = formatSafeTime(m.created_at);
                         const isCodeOpen = !!showChartCodeMap[m.id];
 
                         return (
@@ -1368,9 +1880,21 @@ export default function App() {
                                 </span>
                                 <span className="text-[10px] text-zinc-400 mt-0.5 font-mono">Plot #{cidx + 1}</span>
                               </div>
-                              <span className="text-[10px] text-zinc-550 font-mono shrink-0 mt-0.5">
-                                {plotTime}
-                              </span>
+                              <div className="flex items-center gap-2 shrink-0 mt-0.5">
+                                <span className="text-[10px] text-zinc-550 font-mono">
+                                  {plotTime}
+                                </span>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteChart(m.id);
+                                  }}
+                                  className="text-zinc-500 hover:text-red-400 p-0.5 rounded transition"
+                                  title="Delete Visualization"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             </div>
 
                             {/* Image body */}
@@ -1411,20 +1935,28 @@ export default function App() {
                               
                               <button
                                 onClick={() => {
-                                  setSelectedDiagram({
-                                    id: m.id,
-                                    chartUrl: fullUrl,
-                                    code: m.generated_code || "",
-                                    summary: m.chart_summary || "Visual chart",
-                                    question: associatedQuestion
-                                  });
-                                  setQuestion("");
-                                  setTimeout(() => {
-                                    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-                                    questionInputRef.current?.focus();
-                                  }, 100);
+                                  if (selectedDiagram && selectedDiagram.id === m.id) {
+                                    setSelectedDiagram(null);
+                                  } else {
+                                    setSelectedDiagram({
+                                      id: m.id,
+                                      chartUrl: fullUrl,
+                                      code: m.generated_code || "",
+                                      summary: m.chart_summary || "Visual chart",
+                                      question: associatedQuestion
+                                    });
+                                    setQuestion("");
+                                    setTimeout(() => {
+                                      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+                                      questionInputRef.current?.focus();
+                                    }, 100);
+                                  }
                                 }}
-                                className="flex-1 py-1.5 rounded-lg bg-[#1c1c1f] text-zinc-300 border border-[#27272a] hover:bg-[#27272a] hover:text-white text-[11px] font-semibold flex items-center justify-center gap-1 transition"
+                                className={`flex-1 py-1.5 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1 transition ${
+                                  selectedDiagram?.id === m.id
+                                    ? "bg-amber-600 border-amber-500 text-white hover:bg-amber-500 shadow-md shadow-amber-600/10"
+                                    : "bg-[#1c1c1f] text-zinc-300 border border-[#27272a] hover:bg-[#27272a] hover:text-white"
+                                }`}
                               >
                                 <MessageSquare className="w-3.5 h-3.5" />
                                 <span>Discuss</span>
@@ -1538,11 +2070,7 @@ export default function App() {
                           </div>
                           
                           <div className="col-span-3 text-xs text-zinc-400">
-                            {new Date(s.created_at).toLocaleDateString(undefined, {
-                              month: 'short',
-                              day: 'numeric',
-                              year: 'numeric'
-                            })}
+                            {formatSafeDate(s.created_at)}
                           </div>
                           
                           <div className="col-span-1 flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150" onClick={e => e.stopPropagation()}>
@@ -1856,64 +2384,64 @@ export default function App() {
                   Click <strong>Code</strong> to expand the script, <strong>Discuss</strong> to focus and reply to a chart context, or <strong>Save</strong> to download the chart directly.
                 </p>
               </div>
-              <div>
-                <h4 className="font-bold text-white mb-1">4. Rate Limits & Token Saving</h4>
-                <p className="text-xs text-zinc-400">
-                  Click the **Stop** button next to the input bar to cancel any active query. Large data outputs are automatically truncated to prevent unnecessary token usage.
-                </p>
-              </div>
-            </div>
-            <div className="pt-2 flex justify-end">
-              <button
-                onClick={() => setShowHelpModal(false)}
-                className="px-5 py-2.5 bg-white text-black hover:bg-zinc-200 text-xs font-bold rounded-lg transition"
-              >
-                Got it
-              </button>
             </div>
           </div>
         </div>
       )}
-      {showDeleteConfirmModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[150] flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-[#121214] border border-[#27272a] rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+
+      {deleteConfirm.isOpen && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[250] flex items-center justify-center p-4 animate-fade-in">
+          <div 
+            className="absolute inset-0 cursor-default" 
+            onClick={() => setDeleteConfirm(prev => ({ ...prev, isOpen: false }))}
+          ></div>
+          
+          <div className="relative w-full max-w-md bg-[#121214] border border-[#27272a] rounded-xl shadow-2xl flex flex-col p-5 space-y-4 z-10 animate-fade-in">
             <div className="flex items-center justify-between pb-3 border-b border-[#27272a]">
               <div className="flex items-center gap-2 text-red-400">
                 <AlertTriangle className="w-5 h-5 animate-pulse" />
-                <h3 className="text-lg font-bold text-white">Delete Dataset Source</h3>
+                <h3 className="text-sm font-bold text-white tracking-wide">{deleteConfirm.title}</h3>
               </div>
               <button 
-                onClick={() => setShowDeleteConfirmModal(false)}
-                className="text-zinc-400 hover:text-white p-1 rounded hover:bg-[#1c1c1f]"
+                onClick={() => setDeleteConfirm(prev => ({ ...prev, isOpen: false }))}
+                className="text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-[#1c1c1f] transition-colors"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
             
-            <p className="text-xs text-zinc-350 leading-relaxed">
-              Are you sure you want to delete this dataset source? This will permanently clear all workspace messages and visualizations.
+            <p className="text-xs text-zinc-350 leading-relaxed bg-red-950/10 border border-red-900/20 p-3 rounded-lg">
+              {deleteConfirm.description}
             </p>
-
-            <div className="pt-2 flex justify-end gap-2">
+            
+            <div className="flex gap-2 justify-end">
               <button
                 type="button"
-                onClick={() => setShowDeleteConfirmModal(false)}
-                className="px-4 py-2 border border-[#27272a] hover:bg-[#1c1c1f] rounded-lg text-xs font-semibold text-zinc-400 hover:text-white transition"
+                onClick={() => setDeleteConfirm(prev => ({ ...prev, isOpen: false }))}
+                className="px-4 py-2 border border-[#27272a] hover:bg-[#1c1c1f] rounded-lg text-xs font-semibold text-zinc-400 hover:text-white transition-all active:scale-[0.98]"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={async () => {
-                  await handleDeleteDatasetSource();
-                  setShowDeleteConfirmModal(false);
+                  await deleteConfirm.onConfirm();
+                  setDeleteConfirm(prev => ({ ...prev, isOpen: false }));
                 }}
-                className="px-5 py-2 bg-red-650 hover:bg-red-500 text-white text-xs font-bold rounded-lg transition"
+                className="px-4 py-2 bg-red-650 hover:bg-red-500 text-white text-xs font-bold rounded-lg transition-all shadow-lg shadow-red-900/10 active:scale-[0.98]"
               >
-                Confirm Delete
+                Confirm
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {isCreatingWorkspace && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[300] flex flex-col items-center justify-center p-4 text-center">
+          <Loader2 className="w-10 h-10 animate-spin text-white mb-3" />
+          <h3 className="text-white font-bold text-base">Creating Workspace...</h3>
+          <p className="text-xs text-zinc-400 mt-1.5 max-w-[240px]">Setting up secure calculation sandbox and analytical environment.</p>
         </div>
       )}
       {zoomedChartUrl && (
@@ -1931,6 +2459,69 @@ export default function App() {
               Click anywhere to dismiss
             </span>
           </div>
+        </div>
+      )}
+      {/* Mobile Bottom Navigation Bar */}
+      <div className="md:hidden h-16 border-t border-[#27272a] bg-[#121214] flex items-center justify-around px-2 shrink-0 z-40">
+        <button
+          onClick={() => setActiveMobileTab("workspaces")}
+          className={`flex flex-col items-center justify-center gap-1 flex-1 py-1.5 transition-colors ${
+            activeMobileTab === "workspaces" ? "text-amber-500 font-bold" : "text-zinc-400"
+          }`}
+        >
+          <Sparkles className="w-5 h-5" />
+          <span className="text-[10px] tracking-wider font-semibold">Workspaces</span>
+        </button>
+        <button
+          onClick={() => setActiveMobileTab("schema")}
+          className={`flex flex-col items-center justify-center gap-1 flex-1 py-1.5 transition-colors ${
+            activeMobileTab === "schema" ? "text-amber-500 font-bold" : "text-zinc-400"
+          }`}
+        >
+          <Database className="w-5 h-5" />
+          <span className="text-[10px] tracking-wider font-semibold">Schema</span>
+        </button>
+        <button
+          onClick={() => setActiveMobileTab("chat")}
+          className={`flex flex-col items-center justify-center gap-1 flex-1 py-1.5 transition-colors ${
+            activeMobileTab === "chat" ? "text-amber-500 font-bold" : "text-zinc-400"
+          }`}
+        >
+          <MessageSquare className="w-5 h-5" />
+          <span className="text-[10px] tracking-wider font-semibold">Chat</span>
+        </button>
+        <button
+          onClick={() => setActiveMobileTab("visuals")}
+          className={`flex flex-col items-center justify-center gap-1 flex-1 py-1.5 transition-colors ${
+            activeMobileTab === "visuals" ? "text-amber-500 font-bold" : "text-zinc-400"
+          }`}
+        >
+          <TrendingUp className="w-5 h-5" />
+          <span className="text-[10px] tracking-wider font-semibold">Visuals</span>
+        </button>
+      </div>
+      {/* Premium Notification Toast */}
+      {notification.isOpen && (
+        <div className="fixed top-4 right-4 z-[250] max-w-sm w-full bg-[#121214] border border-[#27272a] rounded-xl shadow-2xl p-4 animate-fade-in flex gap-3">
+          <div className="shrink-0 mt-0.5">
+            {notification.type === "error" && <AlertTriangle className="w-5 h-5 text-red-400" />}
+            {notification.type === "success" && <Check className="w-5 h-5 text-emerald-400" />}
+            {notification.type === "info" && <Sparkles className="w-5 h-5 text-blue-400" />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <h4 className="text-xs font-bold text-white uppercase tracking-wider mb-1">
+              {notification.title}
+            </h4>
+            <p className="text-xs text-zinc-300 leading-relaxed break-words">
+              {notification.message}
+            </p>
+          </div>
+          <button
+            onClick={() => setNotification(prev => ({ ...prev, isOpen: false }))}
+            className="text-zinc-500 hover:text-white transition shrink-0 self-start"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 

@@ -95,6 +95,9 @@ def get_plan(question: str, schema: dict, history: list, error_feedback: str = N
     10. SEABORN DATA RULE: When using seaborn plotting functions (like `sns.barplot`, `sns.lineplot`, `sns.scatterplot`, etc.), you MUST pass the pandas DataFrame containing the columns as the `data` parameter (e.g. `sns.barplot(x="Brand", y="Price", data=result)`). Do not call seaborn plotting methods without passing the `data` parameter.
     11. MATPLOTLIB PLOTTING RULE: When using `plt.subplots()`, it returns a tuple `(fig, ax)`. You MUST call plotting methods on the axis object `ax` (e.g., `ax.plot(...)`, `ax.bar(...)`), not on the axis tuple or figure object.
     12. HIGH CARDINALITY RULE: If a column has high cardinality (more than 15-20 unique values) and you are plotting a bar chart, count plot, or other categorical plot, you MUST limit it to the top 10-15 categories (e.g. using `LIMIT 15` in SQL or `.head(15)` in Pandas) to ensure the plot is clean, readable, and executes quickly. Never attempt to plot categorical charts with dozens, hundreds, or thousands of categories, as this will hang the sandbox container or cause out-of-memory crashes.
+    13. DISCUSSION CONTEXT RULE: If the user's prompt is a follow-up discussing an existing chart context (starting with "[Context: Regarding the chart...]"):
+        - Crucially, do NOT generate any matplotlib/seaborn plotting code (no plt or sns plot calls) UNLESS the user explicitly asks to modify the chart, redraw the chart, change the plot, or update the visualization.
+        - If they are just asking a question about values, counts, averages, or calculations on the chart's data, calculate the numbers/result ONLY and store it in the `result` variable. Do NOT plot anything.
     
     Dataset Auto-Profile Summary (columns, types, nulls):
     {schema}
@@ -184,7 +187,7 @@ def explain_result(question: str, result: any, has_chart: bool) -> tuple[str, li
         fallback_text = f"Calculation completed successfully. Result: {result}"
         return fallback_text, ["Analyze this column in more detail?", "Generate a plot for this data?"], ""
 
-def process_query(session_id: str, question: str, schema: dict, dataset_local_path: str) -> dict:
+def process_query(session_id: str, question: str, schema: dict, dataset_local_path: str, user_chart_url: str = None) -> dict:
     """Main execution loop for user questions. Runs intent routing, code execution retry loop,
     and narrative explanation synthesis.
     """
@@ -209,7 +212,7 @@ def process_query(session_id: str, question: str, schema: dict, dataset_local_pa
     
     if intent in ["CHIT_CHAT", "CLARIFICATION"]:
         ai_reply, follow_ups = handle_conversational(question, schema, history)
-        db_service.save_message(session_id, "user", question)
+        db_service.save_message(session_id, "user", question, chart_url=user_chart_url)
         db_service.save_message(session_id, "assistant", ai_reply, None, None, follow_ups)
         return {
             "role": "assistant",
@@ -247,12 +250,14 @@ def process_query(session_id: str, question: str, schema: dict, dataset_local_pa
             print(f"[ORCHESTRATOR LOOP EXCEPTION]: {error_feedback}")
             
     if not success:
+        error_msg = settings.FALLBACK_ERROR_MESSAGE
         # Enforce retry limit fallback error message
-        db_service.save_message(session_id, "user", question)
-        db_service.save_message(session_id, "assistant", settings.FALLBACK_ERROR_MESSAGE)
+        db_service.save_message(session_id, "user", question, chart_url=user_chart_url)
+        saved_msg = db_service.save_message(session_id, "assistant", error_msg)
         return {
+            "id": saved_msg.get("id"),
             "role": "assistant",
-            "content": settings.FALLBACK_ERROR_MESSAGE,
+            "content": error_msg,
             "generated_code": None,
             "chart_url": None,
             "follow_ups": ["What columns are available in this dataset?", "Can you show me a summary of the dataset structure?", "Provide a statistical summary of the table"]
@@ -277,10 +282,11 @@ def process_query(session_id: str, question: str, schema: dict, dataset_local_pa
     narrative, follow_ups, chart_summary = explain_result(question, result_val, chart_generated)
     
     # Save session records
-    db_service.save_message(session_id, "user", question)
-    db_service.save_message(session_id, "assistant", narrative, cleaned_code, chart_url, follow_ups, chart_summary)
+    db_service.save_message(session_id, "user", question, chart_url=user_chart_url)
+    saved_msg = db_service.save_message(session_id, "assistant", narrative, cleaned_code, chart_url, follow_ups, chart_summary)
     
     return {
+        "id": saved_msg.get("id"),
         "role": "assistant",
         "content": narrative,
         "generated_code": cleaned_code,
