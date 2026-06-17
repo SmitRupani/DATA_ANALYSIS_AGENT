@@ -1750,6 +1750,11 @@ export default function App() {
                     ref={questionInputRef}
                     value={question}
                     onChange={(e) => setQuestion(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && question.trim() && !isQuerying && !streamingMsgId) {
+                        handleSend();
+                      }
+                    }}
                     disabled={!selectedSessionId || isQuerying}
                     placeholder={selectedSessionId ? "Ask a question about the dataset..." : "Select or open a workspace session to query..."}
                     className="flex-1 bg-black border border-[#27272a] rounded-lg px-3 py-2.5 text-sm focus:outline-none text-white placeholder-zinc-600 disabled:opacity-60"
