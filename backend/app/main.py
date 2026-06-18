@@ -4,7 +4,7 @@ import httpx
 import pandas as pd
 import re
 from typing import Optional
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Header
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -26,11 +26,6 @@ app.add_middleware(
 
 TEMP_DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../temp_datasets"))
 os.makedirs(TEMP_DATA_DIR, exist_ok=True)
-
-@app.get("/health")
-async def health_check():
-    """Lightweight ping endpoint to keep the HF Space warm."""
-    return {"status": "ok"}
 
 class SessionCreate(BaseModel):
     title: str
@@ -108,10 +103,9 @@ def get_demo_titanic_csv() -> bytes:
     return stream.getvalue().encode('utf-8')
 
 @app.post("/api/sessions/create-demo")
-async def create_demo_session(x_device_id: Optional[str] = Header(default="default", alias="X-Device-ID")):
-    device_id = x_device_id or "default"
+async def create_demo_session():
     try:
-        session = db_service.create_session("Demo Data Analysis", device_id=device_id)
+        session = db_service.create_session("Demo Data Analysis")
         session_id = session["id"]
         
         file_bytes = get_demo_titanic_csv()
@@ -153,18 +147,16 @@ async def create_demo_session(x_device_id: Optional[str] = Header(default="defau
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/sessions")
-async def create_session(data: SessionCreate, x_device_id: Optional[str] = Header(default="default", alias="X-Device-ID")):
-    device_id = x_device_id or "default"
+async def create_session(data: SessionCreate):
     try:
-        return db_service.create_session(data.title, device_id=device_id)
+        return db_service.create_session(data.title)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/sessions")
-async def get_sessions(x_device_id: Optional[str] = Header(default="default", alias="X-Device-ID")):
-    device_id = x_device_id or "default"
+async def get_sessions():
     try:
-        return db_service.get_sessions(device_id=device_id)
+        return db_service.get_sessions()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -609,18 +601,53 @@ async def get_local_storage_file(bucket_name: str, session_id: str, filename: st
 @app.post("/api/sessions/{session_id}/connect-db")
 async def connect_sql_db(session_id: str, request: DBConnectRequest):
     from sqlalchemy import create_engine
+
+    def parse_db_error(err: Exception) -> str:
+        """Classify SQLAlchemy/driver errors into clear, actionable user messages."""
+        msg = str(err).lower()
+        # Host / network
+        if any(k in msg for k in ["network is unreachable", "connection refused", "could not connect to server", "no route to host"]):
+            return "Cannot reach the server. Check that the host and port are correct and that the server is accepting connections."
+        # DNS / hostname
+        if any(k in msg for k in ["could not translate host name", "name or service not known", "nodename nor servname"]):
+            return "Hostname could not be resolved. Check for typos in the host field."
+        # Authentication
+        if any(k in msg for k in ["password authentication failed", "authentication failed", "access denied for user"]):
+            return "Authentication failed. Your username or password is incorrect."
+        # Database does not exist
+        if "database" in msg and "does not exist" in msg:
+            return "Database not found. Check the database name — it may be misspelled or not yet created."
+        # Table does not exist
+        if any(k in msg for k in ["no such table", "relation", "does not exist"]):
+            return f'Table "{request.table_name}" was not found. Make sure the table name is correct and exists in this database.'
+        # IP / firewall blocked
+        if any(k in msg for k in ["no pg_hba.conf entry", "not permitted", "ip address"]):
+            return "Access denied. Your IP address is not allowed to connect. Add it to the database firewall/allowlist."
+        # SSL
+        if "ssl" in msg:
+            return "SSL error. The server may require an encrypted connection — try enabling SSL or check server settings."
+        # Timeout
+        if "timeout" in msg or "timed out" in msg:
+            return "Connection timed out. The server is reachable but did not respond in time. Try again."
+        # Empty table
+        if "no data" in msg or "empty" in msg:
+            return f'Table "{request.table_name}" exists but contains no rows to import.'
+        # Fallback — strip internal stack noise, show first line only
+        first_line = str(err).split("\n")[0]
+        return f"Connection failed: {first_line}"
+
     # 1. Ingest table using SQLAlchemy
     try:
         engine = create_engine(request.connection_string)
         with engine.connect() as con:
-            # Query the table
             query = f'SELECT * FROM "{request.table_name}"'
             df = pd.read_sql_query(query, con)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Database Connection Error: {e}")
-    
+        friendly = parse_db_error(e)
+        raise HTTPException(status_code=400, detail=friendly)
+
     if df.empty:
-        raise HTTPException(status_code=400, detail="The requested table has no data rows.")
+        raise HTTPException(status_code=400, detail=f'Table "{request.table_name}" exists but has no data rows to import.')
 
     # 2. Save the pulled data as a local CSV
     file_name = f"{request.table_name}.csv"

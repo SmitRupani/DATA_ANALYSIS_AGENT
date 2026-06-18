@@ -206,6 +206,7 @@ export default function App() {
   const [activeQuestion, setActiveQuestion] = useState("");
   
   const [showSqlModal, setShowSqlModal] = useState(false);
+  const [dbError, setDbError] = useState<string | null>(null);
   const [dbType, setDbType] = useState("postgresql");
   const [dbHost, setDbHost] = useState("");
   const [dbPort, setDbPort] = useState("5432");
@@ -655,6 +656,7 @@ export default function App() {
         setDataset(data.dataset);
         fetchSessionData(selectedSessionId);
         setShowSqlModal(false);
+        setDbError(null);
         // Reset states
         setDbHost("");
         setDbPort(dbType === "mysql" ? "3306" : "5432");
@@ -664,11 +666,11 @@ export default function App() {
         setDbTable("");
       } else {
         const errData = await res.json();
-        showNotification("error", "Connection Failed", errData.detail || "Database connection failed.");
+        setDbError(errData.detail || "Database connection failed.");
       }
     } catch (err) {
       console.error("DB connection error:", err);
-      showNotification("error", "Connection Error", "An error occurred connecting to database.");
+      setDbError("Network error — could not reach the backend. Make sure the server is running.");
     } finally {
       setIsConnectingDb(false);
     }
@@ -2695,10 +2697,7 @@ export default function App() {
                   <label className="block text-[10px] uppercase font-mono text-zinc-400 mb-1">Database Type</label>
                   <select
                     value={dbType}
-                    onChange={(e) => {
-                      setDbType(e.target.value);
-                      setDbPort(e.target.value === "mysql" ? "3306" : "5432");
-                    }}
+                    onChange={(e) => { setDbType(e.target.value); setDbPort(e.target.value === "mysql" ? "3306" : "5432"); setDbError(null); }}
                     className="w-full bg-black border border-[#27272a] rounded px-3 py-2 text-xs text-white focus:outline-none focus:border-zinc-500"
                   >
                     <option value="postgresql">PostgreSQL</option>
@@ -2712,7 +2711,7 @@ export default function App() {
                     required
                     placeholder="localhost"
                     value={dbHost}
-                    onChange={(e) => setDbHost(e.target.value)}
+                    onChange={(e) => { setDbHost(e.target.value); setDbError(null); }}
                     className="w-full bg-black border border-[#27272a] rounded px-3 py-2 text-xs text-white focus:outline-none focus:border-zinc-500"
                   />
                 </div>
@@ -2726,7 +2725,7 @@ export default function App() {
                     required
                     placeholder={dbType === "mysql" ? "3306" : "5432"}
                     value={dbPort}
-                    onChange={(e) => setDbPort(e.target.value)}
+                    onChange={(e) => { setDbPort(e.target.value); setDbError(null); }}
                     className="w-full bg-black border border-[#27272a] rounded px-3 py-2 text-xs text-white focus:outline-none focus:border-zinc-500 font-mono"
                   />
                 </div>
@@ -2737,7 +2736,7 @@ export default function App() {
                     required
                     placeholder="my_database"
                     value={dbName}
-                    onChange={(e) => setDbName(e.target.value)}
+                    onChange={(e) => { setDbName(e.target.value); setDbError(null); }}
                     className="w-full bg-black border border-[#27272a] rounded px-3 py-2 text-xs text-white focus:outline-none focus:border-zinc-500"
                   />
                 </div>
@@ -2751,7 +2750,7 @@ export default function App() {
                     required
                     placeholder="postgres"
                     value={dbUser}
-                    onChange={(e) => setDbUser(e.target.value)}
+                    onChange={(e) => { setDbUser(e.target.value); setDbError(null); }}
                     className="w-full bg-black border border-[#27272a] rounded px-3 py-2 text-xs text-white focus:outline-none focus:border-zinc-500"
                   />
                 </div>
@@ -2762,7 +2761,7 @@ export default function App() {
                     required
                     placeholder="••••••••"
                     value={dbPass}
-                    onChange={(e) => setDbPass(e.target.value)}
+                    onChange={(e) => { setDbPass(e.target.value); setDbError(null); }}
                     className="w-full bg-black border border-[#27272a] rounded px-3 py-2 text-xs text-white focus:outline-none focus:border-zinc-500"
                   />
                 </div>
@@ -2775,10 +2774,16 @@ export default function App() {
                   required
                   placeholder="users"
                   value={dbTable}
-                  onChange={(e) => setDbTable(e.target.value)}
+                  onChange={(e) => { setDbTable(e.target.value); setDbError(null); }}
                   className="w-full bg-black border border-[#27272a] rounded px-3 py-2 text-xs text-white focus:outline-none focus:border-zinc-500"
                 />
               </div>
+
+              {dbError && (
+                <div className="text-xs text-red-400 bg-red-950/20 border border-red-900/30 p-2 rounded">
+                  {dbError}
+                </div>
+              )}
 
               <div className="pt-2 flex justify-end gap-2">
                 <button
