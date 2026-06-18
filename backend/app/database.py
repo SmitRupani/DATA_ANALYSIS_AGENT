@@ -9,13 +9,13 @@ class SupabaseService:
         if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
             # Fallback or stub for local dev without credentials
             self.client = None
-            self.mock_sessions = []
-            self.mock_datasets = {} # session_id -> dataset
-            self.mock_messages = {} # session_id -> list of messages
+            self.mock_sessions = []  # list of dicts, each has 'device_id'
+            self.mock_datasets = {}  # (device_id, session_id) -> dataset
+            self.mock_messages = {}  # session_id -> list of messages (session_id is globally unique UUID so no collision)
         else:
             self.client: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
 
-    def create_session(self, title: str) -> dict:
+    def create_session(self, title: str, device_id: str = "default") -> dict:
         """Creates a new user chat session."""
         if not self.client:
             import uuid
@@ -23,12 +23,13 @@ class SupabaseService:
             session = {
                 "id": str(uuid.uuid4()),
                 "title": title,
+                "device_id": device_id,
                 "created_at": datetime.utcnow().isoformat() + "Z"
             }
             self.mock_sessions.append(session)
             return session
         
-        response = self.client.table("sessions").insert({"title": title}).execute()
+        response = self.client.table("sessions").insert({"title": title, "device_id": device_id}).execute()
         return response.data[0] if response.data else {}
 
     def rename_session(self, session_id: str, new_title: str) -> dict:
@@ -43,12 +44,12 @@ class SupabaseService:
         response = self.client.table("sessions").update({"title": new_title}).eq("id", session_id).execute()
         return response.data[0] if response.data else {}
 
-    def get_sessions(self) -> list[dict]:
-        """Lists all chat sessions."""
+    def get_sessions(self, device_id: str = "default") -> list[dict]:
+        """Lists all chat sessions for a specific device."""
         if not self.client:
-            return self.mock_sessions
+            return [s for s in self.mock_sessions if s.get("device_id", "default") == device_id]
         
-        response = self.client.table("sessions").select("*").order("created_at", desc=True).execute()
+        response = self.client.table("sessions").select("*").eq("device_id", device_id).order("created_at", desc=True).execute()
         return response.data
 
     def delete_session(self, session_id: str) -> bool:
@@ -74,8 +75,9 @@ class SupabaseService:
         base_id = session_id.split(":")[0]
         if not self.client:
             from datetime import datetime
+            import uuid
             dataset = {
-                "id": "mock-dataset-id",
+                "id": str(uuid.uuid4()),
                 "session_id": base_id,
                 "file_name": file_name,
                 "s3_path": s3_path,

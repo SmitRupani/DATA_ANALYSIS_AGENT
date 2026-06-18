@@ -1,0 +1,7 @@
+ui fixes:
+
+1) remove the initial suggestins after the first message is sent so that the new suggestinss show up beloew the resposne.
+
+
+When a user clicks "Try with Demo Dataset" or drops a file into your layout, your React frontend should just quietly ping the FastAPI backend to generate a session_id in your Supabase database behind the scenes. You automatically name the workspace something mundane like "Session - [Timestamp]" or "Demo Data Analysis", and immediately dump them into the chat interface.
+But make sure the dataset is complex,like a titanic dataset if that matters, we will already store it in our supabase and thne we will also have folowup ready 

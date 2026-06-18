@@ -60,6 +60,27 @@ interface Message {
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000/api";
 
+// Generate or retrieve a persistent device ID for session isolation.
+// Each browser profile / incognito window gets its own UUID so sessions
+// are never shared across users or tabs.
+const getDeviceId = (): string => {
+  let id = localStorage.getItem("data_agent_device_id");
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem("data_agent_device_id", id);
+  }
+  return id;
+};
+
+const DEVICE_ID = getDeviceId();
+
+/** Drop-in replacement for fetch() that always attaches X-Device-ID header. */
+const apiFetch = (url: string, init: RequestInit = {}): Promise<Response> => {
+  const headers = new Headers(init.headers || {});
+  headers.set("X-Device-ID", DEVICE_ID);
+  return fetch(url, { ...init, headers });
+};
+
 export default function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(() => {
@@ -383,7 +404,7 @@ export default function App() {
 
   const fetchSessions = async () => {
     try {
-      const res = await fetch(`${API_BASE}/sessions`);
+      const res = await apiFetch(`${API_BASE}/sessions`);
       if (res.ok) {
         const data = await res.json();
         setSessions(data);
@@ -395,7 +416,7 @@ export default function App() {
 
   const handleRenameSession = async (id: string, newTitle: string) => {
     try {
-      const res = await fetch(`${API_BASE}/sessions/${id}`, {
+      const res = await apiFetch(`${API_BASE}/sessions/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: newTitle })
@@ -413,7 +434,7 @@ export default function App() {
     if (!newSessionTitle.trim()) return;
     setIsCreatingWorkspace(true);
     try {
-      const res = await fetch(`${API_BASE}/sessions`, {
+      const res = await apiFetch(`${API_BASE}/sessions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: newSessionTitle })
@@ -465,7 +486,7 @@ export default function App() {
     try {
       const sessionIdWithThread = threadId === "default" ? sessionId : `${sessionId}:${threadId}`;
       // Fetch messages
-      const msgRes = await fetch(`${API_BASE}/sessions/${sessionIdWithThread}/messages`);
+      const msgRes = await apiFetch(`${API_BASE}/sessions/${sessionIdWithThread}/messages`);
       if (msgRes.ok) {
         const msgs: Message[] = await msgRes.json();
         setMessages(msgs);
@@ -474,7 +495,7 @@ export default function App() {
       }
 
       // Fetch dataset info
-      const dsRes = await fetch(`${API_BASE}/sessions/${sessionId.split(":")[0]}/dataset`);
+      const dsRes = await apiFetch(`${API_BASE}/sessions/${sessionId.split(":")[0]}/dataset`);
       if (dsRes.ok) {
         const dsData = await dsRes.json();
         setDataset(dsData);
@@ -488,7 +509,7 @@ export default function App() {
 
   const confirmDeleteSession = async (id: string) => {
     try {
-      const res = await fetch(`${API_BASE}/sessions/${id}`, { method: "DELETE" });
+      const res = await apiFetch(`${API_BASE}/sessions/${id}`, { method: "DELETE" });
       if (res.ok) {
         setSessions(prev => prev.filter(s => s.id !== id));
         if (selectedSessionId === id) {
@@ -512,7 +533,7 @@ export default function App() {
 
   const confirmDeleteChart = async (messageId: string) => {
     try {
-      const res = await fetch(`${API_BASE}/messages/${messageId}/chart`, { method: "DELETE" });
+      const res = await apiFetch(`${API_BASE}/messages/${messageId}/chart`, { method: "DELETE" });
       if (res.ok) {
         setMessages(prev => prev.map(m => {
           if (m.id === messageId) {
@@ -540,6 +561,7 @@ export default function App() {
     return new Promise<any>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open("POST", `${API_BASE}/sessions/${targetSessionId}/upload`);
+      xhr.setRequestHeader("X-Device-ID", DEVICE_ID);
       
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) {
@@ -619,7 +641,7 @@ export default function App() {
 
     setIsConnectingDb(true);
     try {
-      const res = await fetch(`${API_BASE}/sessions/${selectedSessionId}/connect-db`, {
+      const res = await apiFetch(`${API_BASE}/sessions/${selectedSessionId}/connect-db`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -675,7 +697,7 @@ export default function App() {
     setShowReplaceModal(false);
     setIsCreatingWorkspace(true);
     try {
-      const res = await fetch(`${API_BASE}/sessions`, {
+      const res = await apiFetch(`${API_BASE}/sessions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: `Workspace - ${pendingUploadFile.name}` })
@@ -710,7 +732,7 @@ export default function App() {
   const handleCreateDemoSession = async () => {
     setIsCreatingDemoSession(true);
     try {
-      const res = await fetch(`${API_BASE}/sessions/create-demo`, {
+      const res = await apiFetch(`${API_BASE}/sessions/create-demo`, {
         method: "POST"
       });
       if (res.ok) {
@@ -743,7 +765,7 @@ export default function App() {
     if (!selectedSessionId || !dataset) return;
     setIsCleaningDataset(true);
     try {
-      const res = await fetch(`${API_BASE}/sessions/${selectedSessionId}/clean-dataset`, {
+      const res = await apiFetch(`${API_BASE}/sessions/${selectedSessionId}/clean-dataset`, {
         method: "POST"
       });
       if (res.ok) {
@@ -913,7 +935,7 @@ export default function App() {
 
     const sessionIdWithThread = activeThreadId === "default" ? selectedSessionId : `${selectedSessionId}:${activeThreadId}`;
     try {
-      const res = await fetch(`${API_BASE}/sessions/${sessionIdWithThread}/query`, {
+      const res = await apiFetch(`${API_BASE}/sessions/${sessionIdWithThread}/query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -970,7 +992,7 @@ export default function App() {
   const handleDeleteDatasetSource = async () => {
     if (!selectedSessionId) return;
     try {
-      const res = await fetch(`${API_BASE}/sessions/${selectedSessionId}/dataset`, {
+      const res = await apiFetch(`${API_BASE}/sessions/${selectedSessionId}/dataset`, {
         method: "DELETE"
       });
       if (res.ok) {
@@ -989,7 +1011,7 @@ export default function App() {
   const confirmClearWorkspaceChat = async () => {
     if (!selectedSessionId) return;
     try {
-      const res = await fetch(`${API_BASE}/sessions/${selectedSessionId}/messages`, {
+      const res = await apiFetch(`${API_BASE}/sessions/${selectedSessionId}/messages`, {
         method: "DELETE"
       });
       if (res.ok) {

@@ -4,7 +4,7 @@ import httpx
 import pandas as pd
 import re
 from typing import Optional
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -103,9 +103,10 @@ def get_demo_titanic_csv() -> bytes:
     return stream.getvalue().encode('utf-8')
 
 @app.post("/api/sessions/create-demo")
-async def create_demo_session():
+async def create_demo_session(x_device_id: Optional[str] = Header(default="default", alias="X-Device-ID")):
+    device_id = x_device_id or "default"
     try:
-        session = db_service.create_session("Demo Data Analysis")
+        session = db_service.create_session("Demo Data Analysis", device_id=device_id)
         session_id = session["id"]
         
         file_bytes = get_demo_titanic_csv()
@@ -147,16 +148,18 @@ async def create_demo_session():
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/sessions")
-async def create_session(data: SessionCreate):
+async def create_session(data: SessionCreate, x_device_id: Optional[str] = Header(default="default", alias="X-Device-ID")):
+    device_id = x_device_id or "default"
     try:
-        return db_service.create_session(data.title)
+        return db_service.create_session(data.title, device_id=device_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/sessions")
-async def get_sessions():
+async def get_sessions(x_device_id: Optional[str] = Header(default="default", alias="X-Device-ID")):
+    device_id = x_device_id or "default"
     try:
-        return db_service.get_sessions()
+        return db_service.get_sessions(device_id=device_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
