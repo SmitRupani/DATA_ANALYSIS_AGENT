@@ -1,5 +1,5 @@
 fastapi
-uvicorn
+uvicorn[standard]
 duckdb
 groq
 python-dotenv
@@ -8,7 +8,10 @@ pydantic
 pydantic-settings
 python-multipart
 httpx
-pytest
 sqlalchemy
 psycopg2-binary
+pandas
+numpy
+matplotlib
+seaborn
 openpyxl

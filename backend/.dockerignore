@@ -1,0 +1,25 @@
+# Never include secrets or local environment
+.env
+
+# Python cache and build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# Local runtime directories (created fresh in container)
+temp_datasets/
+local_storage/
+
+# Virtual environments
+venv/
+.venv/
+
+# Debug/test scripts
+check_csv.py
+
+# Git
+.git/
+.gitignore
