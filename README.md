@@ -53,4 +53,10 @@ python app.py
 * Update file paths if needed
 * Requires Python 3.x
 
+## Contributors
+
+* **Ahmad Anzar** (Lead Developer)
+* **Smit Rupani** (Security & Sandbox Hardening)
+* **Sahadheep Reddy** (Project Setup & Documentation)
+
 ---
