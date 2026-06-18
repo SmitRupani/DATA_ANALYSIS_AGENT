@@ -1,14 +1,3 @@
----
-title: Data Analysis Agent
-emoji: 📊
-colorFrom: indigo
-colorTo: purple
-sdk: docker
-app_port: 7860
-python_version: "3.11"
-pinned: false
----
-
 # EasyInsight
 
 EasyInsight is an autonomous data analysis platform that enables users to upload datasets (CSV, JSON, Excel) or establish their SQL/Postgres connection, run natural language queries, and automatically generate code, statistical analysis, and visualizations in a secure execution sandbox.
