@@ -18,6 +18,7 @@ from .utils import (
     download_dataset_if_missing,
     get_demo_titanic_csv,
     parse_db_error,
+    delete_local_cached_files,
 )
 
 app = FastAPI(title="Autonomous Data Analysis Agent API")
@@ -113,12 +114,7 @@ async def rename_session(session_id: str, data: SessionCreate):
 async def delete_session(session_id: str):
     try:
         # Delete local cached files
-        for f in os.listdir(TEMP_DATA_DIR):
-            if f.startswith(session_id):
-                try:
-                    os.remove(os.path.join(TEMP_DATA_DIR, f))
-                except Exception:
-                    pass
+        delete_local_cached_files(session_id)
         db_service.delete_session(session_id)
         return {"success": True}
     except Exception as e:
@@ -144,12 +140,7 @@ async def delete_session_dataset(session_id: str):
             db_service.client.table("messages").delete().eq("session_id", base_id).execute()
         
         # Also delete local cached files
-        for f in os.listdir(TEMP_DATA_DIR):
-            if f.startswith(base_id):
-                try:
-                    os.remove(os.path.join(TEMP_DATA_DIR, f))
-                except Exception:
-                    pass
+        delete_local_cached_files(base_id)
                     
         return {"success": True}
     except Exception as e:

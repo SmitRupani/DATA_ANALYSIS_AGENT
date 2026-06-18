@@ -135,3 +135,15 @@ def parse_db_error(err: Exception, table_name: str) -> str:
     # Fallback — strip internal stack noise, show first line only
     first_line = str(err).split("\n")[0]
     return f"Connection failed: {first_line}"
+
+def delete_local_cached_files(prefix: str) -> None:
+    """Deletes cached dataset/table files starting with the given prefix in the temp directory."""
+    if not os.path.exists(TEMP_DATA_DIR):
+        return
+    for f in os.listdir(TEMP_DATA_DIR):
+        if f.startswith(prefix):
+            try:
+                os.remove(os.path.join(TEMP_DATA_DIR, f))
+            except Exception as e:
+                print(f"[WARNING] Failed to remove cached file {f}: {e}")
+
