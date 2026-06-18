@@ -128,6 +128,9 @@ export default function App() {
   const [sessionMenuId, setSessionMenuId] = useState<string | null>(null);
   const [copiedSessionId, setCopiedSessionId] = useState<string | null>(null);
   const [selectedStatsCol, setSelectedStatsCol] = useState<string | null>(null);
+  const [showWelcome, setShowWelcome] = useState(() => {
+    return localStorage.getItem("data_agent_show_welcome") !== "false";
+  });
   const [activeNavMenu, setActiveNavMenu] = useState<"file" | "database" | "help" | null>(null);
   const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
   
@@ -1605,10 +1608,20 @@ export default function App() {
 
               <div className="flex-1 overflow-y-auto p-4 pb-20 space-y-4">
                 {/* Default welcome guide chat background when no session is selected */}
-                {!selectedSessionId || messages.length === 0 ? (
-                  <div className="space-y-4">
-                    <div className="bg-[#1c1c1f] border border-[#27272a] rounded-2xl p-4 text-sm text-zinc-300 space-y-2">
-                      <h3 className="font-bold text-white text-base">Welcome to the Autonomous Data Agent</h3>
+                {showWelcome && (!selectedSessionId || messages.length === 0) ? (
+                  <div className="space-y-4 animate-fade-in">
+                    <div className="bg-[#1c1c1f] border border-[#27272a] rounded-2xl p-4 text-sm text-zinc-300 space-y-2 relative">
+                      <button
+                        onClick={() => {
+                          setShowWelcome(false);
+                          localStorage.setItem("data_agent_show_welcome", "false");
+                        }}
+                        className="absolute top-3.5 right-3.5 text-zinc-400 hover:text-white p-1 rounded hover:bg-[#27272a] transition"
+                        title="Dismiss Welcome"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                      <h3 className="font-bold text-white text-base pr-6">Welcome to EasyInsight</h3>
                       <p className="text-xs text-zinc-400 leading-relaxed">
                         This is an interactive analytics environment. Once you launch a workspace, you can ingest files, query stats, and automatically visualize datasets.
                       </p>
@@ -1616,7 +1629,7 @@ export default function App() {
                     <div className="bg-[#1c1c1f] border border-[#27272a] rounded-2xl p-4 text-sm text-zinc-300 space-y-2">
                       <h4 className="font-bold text-white text-xs uppercase tracking-wider text-zinc-400">Quick Guide:</h4>
                       <ol className="list-decimal pl-4 space-y-1.5 text-xs text-zinc-400">
-                        <li>Import your dataset (CSV, JSON, or Excel) or connect to your database.</li>
+                        <li>Import your dataset (CSV, JSON, Excel, or SQL) or connect to your database.</li>
                         <li>Ask query calculations directly in natural language (e.g., "Find the average salary by department").</li>
                         <li>Visualize graphs dynamically in the Visual Analytics viewport.</li>
                       </ol>

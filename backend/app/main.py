@@ -176,6 +176,7 @@ async def upload_dataset(session_id: str, file: UploadFile = File(...)):
             sql_clean = re.sub(r'AUTO_INCREMENT', '', sql_clean, flags=re.IGNORECASE)
 
             # Execute in temporary DuckDB connection to extract the data
+            # pyrefly: ignore [missing-import]
             import duckdb
             temp_con = duckdb.connect(database=':memory:')
             temp_con.execute(sql_clean)
