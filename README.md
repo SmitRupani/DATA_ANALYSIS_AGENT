@@ -1,106 +1,345 @@
-# EasyInsight
+# 📊 EasyInsight
 
-EasyInsight is an autonomous data analysis platform that enables users to upload datasets (CSV, JSON, Excel) or establish their SQL/Postgres connection, run natural language queries, and automatically generate code, statistical analysis, and visualizations in a secure execution sandbox.
+> AI-powered data analysis platform that transforms datasets and databases into actionable insights using natural language.
 
----
+**EasyInsight** enables users to upload datasets, connect SQL databases, ask questions in plain English, and automatically generate analyses, visualizations, and executable code in a secure sandbox environment.
 
-## Architecture
-
-The application is split into two main components:
-1. **Frontend**: A React application built with TypeScript, Vite, and Tailwind CSS.
-2. **Backend**: A FastAPI server running Python 3.11, integrated with Groq (Llama 3.3) for query processing, Supabase for persistent storage, and DuckDB for lightweight analytical execution.
+🌐 **Live Demo:** https://data-analysis-agent-one.vercel.app
 
 ---
 
-## Features
+## ✨ Features
 
-- **Natural Language Data Queries**: Type questions in plain English to extract insights from uploaded datasets.
-- **Secure Sandbox Execution**: Executes LLM-generated code in a isolated Docker sandbox container.
-- **Static Code Validation**: Scans generated Python code against security policies (imports, attributes, and function call analysis) before execution.
-- **Dynamic Chart Generation**: Automatically designs, saves, and serves data visualizations. Includes dynamic signed URL resolution to prevent image access expiration.
-- **Database Connectivity**: Connect directly to external PostgreSQL or MySQL databases to ingest and profile tables.
-- **Workspace Isolation**: Save and separate chat sessions, datasets, and message histories.
+### 🧠 Natural Language Data Analysis
+
+Ask questions about your data in plain English and receive:
+
+* Statistical insights
+* Automated summaries
+* Data-driven explanations
+* Interactive visualizations
+
+### 📂 Multi-Source Data Ingestion
+
+Import and analyze data from:
+
+* CSV files
+* JSON files
+* Excel spreadsheets
+* PostgreSQL databases
+* MySQL databases
+
+### 🤖 AI-Powered Analytics Engine
+
+Leverages Large Language Models to:
+
+* Generate analytical Python code
+* Perform statistical analysis
+* Answer complex data questions
+* Explain findings conversationally
+
+### 📈 Automatic Visualization Generation
+
+Generate charts and visual insights automatically using:
+
+* Pandas
+* Matplotlib
+* NumPy
+* Statistical profiling tools
+
+Charts are securely generated, stored, and served with dynamic signed URL resolution.
+
+### 🔒 Secure Sandbox Execution
+
+All generated code executes inside an isolated Docker sandbox environment with strict resource controls and security policies.
+
+### 🛡️ Static Code Validation
+
+Every generated script undergoes security checks before execution:
+
+* Import validation
+* Attribute inspection
+* Function call analysis
+* Policy-based restrictions
+
+### 🗂️ Workspace Isolation
+
+Organize analyses into dedicated workspaces containing:
+
+* Datasets
+* Chat sessions
+* Message history
+* Generated reports
+* Visual analytics
+
+### ⚡ Intelligent Model Fallback
+
+Automatically switches between available LLM models when rate limits are encountered, ensuring uninterrupted analysis.
 
 ---
 
-## Prerequisites
+## 🏗️ Architecture
 
-- Python 3.11+
-- Node.js 18+
-- Docker (optional, but required for secure sandbox execution)
+```text
+┌─────────────────────────┐
+│     React Frontend      │
+│ TypeScript + Vite + TS  │
+└───────────┬─────────────┘
+            │
+            ▼
+┌─────────────────────────┐
+│      FastAPI Server     │
+│      Python 3.11        │
+└───────┬────────┬────────┘
+        │        │
+        ▼        ▼
+      Groq    Supabase
+      LLM      Storage
+        │
+        ▼
+     DuckDB Engine
+        │
+        ▼
+  Docker Sandbox Runtime
+```
 
 ---
 
-## Setup and Running
+## 📸 Screenshots
 
-### 1. Backend Setup
+### Workspace Management
+
+Create isolated workspaces and instantly explore the built-in demo environment.
+
+![Workspace Selection](workspace-selection.png)
+
+### Interactive Analysis Room
+
+Explore ingested datasets, inspect schemas, and ask questions naturally.
+
+![Analysis Room](analysis-room.png)
+
+### Natural Language Analytics
+
+Ask complex questions such as:
+
+* Which age has the highest survival rate?
+* Compare survival rates by sex.
+* Show the average fare paid by passenger class.
+
+EasyInsight automatically generates code, executes analysis securely, and presents the results in natural language.
+
+![Analytics Results](analytics-results.png)
+
+### SQL Database Connectivity
+
+Connect directly to external databases and analyze live data.
+
+Supported databases:
+
+* PostgreSQL
+* MySQL
+
+![SQL Connection](sql-connect.png)
+
+---
+
+## 🛠️ Tech Stack
+
+### Frontend
+
+* React
+* TypeScript
+* Vite
+* Tailwind CSS
+
+### Backend
+
+* FastAPI
+* Python 3.11
+* Groq API (Llama Models)
+* Supabase
+* DuckDB
+* Docker
+
+### Data & Analytics
+
+* Pandas
+* Matplotlib
+* NumPy
+* SQLAlchemy
+* OpenPyXL
+* Database connectors and profiling libraries
+
+---
+
+## 📂 Project Structure
+
+```text
+EasyInsight/
+├── backend/              # FastAPI server and analysis engine
+├── frontend/             # React + TypeScript application
+├── docker_sandbox/       # Secure code execution environment
+├── cli_prototype/        # Experimental command-line interface
+├── supabase/             # Database configurations and migrations
+├── README.md
+├── workspace-selection.png
+├── analysis-room.png
+├── analytics-results.png
+└── sql-connect.png
+```
+
+---
+
+## ⚙️ Prerequisites
+
+* Python 3.11+
+* Node.js 18+
+* Docker (recommended for secure sandbox execution)
+
+---
+
+# 🚀 Getting Started
+
+## 1. Clone the Repository
+
+```bash
+git clone <repository-url>
+cd EasyInsight
+```
+
+## 2. Backend Setup
 
 Navigate to the backend directory:
+
 ```bash
 cd backend
 ```
 
-Create a virtual environment and install the dependencies:
+Create and activate a virtual environment:
+
 ```bash
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Linux/macOS
+source venv/bin/activate
+
+# Windows
+venv\Scripts\activate
+```
+
+Install dependencies:
+
+```bash
 pip install -r requirements.txt
 ```
 
-Create a `.env` file based on `.env.example`:
+Create a `.env` file:
+
 ```env
 GROQ_API_KEY=your_groq_api_key
 SUPABASE_URL=your_supabase_url
 SUPABASE_KEY=your_supabase_anon_key
-REQUIRE_DOCKER=false  # Set to true in production
+REQUIRE_DOCKER=false
 ```
 
 Start the backend server:
+
 ```bash
 uvicorn app.main:app --reload --port 8000
 ```
 
-### 2. Frontend Setup
+## 3. Frontend Setup
 
 Navigate to the frontend directory:
-```bash
-cd ../frontend
-```
 
-Install the dependencies:
 ```bash
+cd frontend
 npm install
 ```
 
-Create a `.env` file based on `.env.example`:
+Create a `.env` file:
+
 ```env
 VITE_API_BASE=http://localhost:8000/api
 ```
 
-Start the frontend development server:
+Start the development server:
+
 ```bash
 npm run dev
 ```
 
 ---
 
-## Production Deployment (Hugging Face Spaces)
+## 🐳 Deployment
 
-The backend is configured to run on Hugging Face Spaces using the Docker SDK.
+EasyInsight is configured to run on Hugging Face Spaces using Docker.
 
-1. Ensure the Dockerfile listens on port `7860`.
-2. Configure variables and secrets in your Hugging Face Space Settings:
-   - `GROQ_API_KEY`
-   - `SUPABASE_URL`
-   - `SUPABASE_KEY`
-   - `REQUIRE_DOCKER` (Set to `true` to enforce sandbox isolation)
-3. Set `VITE_API_BASE` in the frontend production build to point to your Hugging Face Space app URL (e.g., `https://<username>-<space-name>.hf.space/api`).
+### Environment Variables
+
+```env
+GROQ_API_KEY=
+SUPABASE_URL=
+SUPABASE_KEY=
+REQUIRE_DOCKER=true
+```
+
+Frontend production environment:
+
+```env
+VITE_API_BASE=https://<username>-<space-name>.hf.space/api
+```
+
+Ensure the Docker container exposes port `7860`.
 
 ---
+
+## 🔄 Typical Workflow
+
+1. Create or open a workspace.
+2. Upload datasets or connect a SQL database.
+3. Ask questions in natural language.
+4. Generate Python code automatically.
+5. Execute code securely inside Docker.
+6. Receive insights, statistics, and visualizations.
+7. Export reports and continue analysis sessions.
+
+---
+
+## 🤝 Contributing
+
+1. Fork the repository.
+2. Create a branch:
+
+```bash
+git checkout -b feature-name
+```
+
+3. Commit your changes:
+
+```bash
+git commit -m "Add feature"
+```
+
+4. Push your branch:
+
+```bash
+git push origin feature-name
+```
+
+5. Open a Pull Request.
+
+---
+
+> **EasyInsight empowers anyone to explore data conversationally—turning datasets and databases into insights through AI-powered analytics, secure code execution, and automated visualizations.**
+
+---
+
 title: EasyInsight
 emoji: 📊
 colorFrom: blue
 colorTo: green
 sdk: docker
 pinned: false
----
+-------------
