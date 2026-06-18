@@ -14,19 +14,24 @@ def load_file_into_duckdb(con: duckdb.DuckDBPyConnection, filepath: str) -> str:
     ext = os.path.splitext(filepath)[-1].lower()
     view_name = "data_source"
     
-    if ext == ".csv":
-        con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT * FROM read_csv_auto('{filepath}')")
-    elif ext == ".json":
-        con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT * FROM read_json_auto('{filepath}')")
-    elif ext in [".xls", ".xlsx"]:
-        # Fallback to pandas for Excel, then register the dataframe in DuckDB
-        try:
-            df = pd.read_excel(filepath)
-            con.register(view_name, df)
-        except ImportError:
-            raise ValueError("Excel parsing is not configured on this server. Please convert your file to CSV and upload again.")
-    else:
-        raise ValueError(f"Unsupported format: {ext}. Only CSV, Excel, and JSON are supported.")
+    try:
+        if ext == ".csv":
+            con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT * FROM read_csv_auto('{filepath}')")
+        elif ext == ".json":
+            con.execute(f"CREATE OR REPLACE VIEW {view_name} AS SELECT * FROM read_json_auto('{filepath}')")
+        elif ext in [".xls", ".xlsx"]:
+            # Fallback to pandas for Excel, then register the dataframe in DuckDB
+            try:
+                df = pd.read_excel(filepath)
+                con.register(view_name, df)
+            except ImportError:
+                raise ValueError("Excel parsing is not configured on this server. Please convert your file to CSV and upload again.")
+        else:
+            raise ValueError(f"Unsupported format: {ext}. Only CSV, Excel, and JSON are supported.")
+    except duckdb.Error as de:
+        raise ValueError(f"DuckDB failed to parse the file: {str(de)}. Please verify that the file content matches the file extension and is correctly formatted.")
+    except Exception as e:
+        raise ValueError(f"Error loading file: {str(e)}")
         
     return view_name
 

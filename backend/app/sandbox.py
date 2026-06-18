@@ -222,8 +222,11 @@ with open(os.path.join(output_dir, "result.json"), "w") as rf:
     if not os.path.exists(result_json_path):
         return False, "Code ran but did not produce a result.", False
 
-    with open(result_json_path, "r", encoding="utf-8") as rf:
-        payload = json.load(rf)
+    try:
+        with open(result_json_path, "r", encoding="utf-8") as rf:
+            payload = json.load(rf)
+    except json.JSONDecodeError as je:
+        return False, f"Failed to parse result payload from safe local execution: {je}", False
 
     chart_generated = payload.get("chart", False)
     return True, payload.get("result"), chart_generated
@@ -335,8 +338,11 @@ def execute_in_sandbox(code_content: str, dataset_local_path: str) -> tuple[bool
         if not os.path.exists(result_json_path):
             return False, "Code finished successfully but did not export a result payload.", False, ""
 
-        with open(result_json_path, "r", encoding="utf-8") as rf:
-            output_payload = json.load(rf)
+        try:
+            with open(result_json_path, "r", encoding="utf-8") as rf:
+                output_payload = json.load(rf)
+        except json.JSONDecodeError as je:
+            return False, f"Failed to parse result payload from sandbox: {je}", False, ""
 
         chart_local_path = os.path.join(output_dir, "output_chart.png")
         chart_generated = os.path.exists(chart_local_path)
